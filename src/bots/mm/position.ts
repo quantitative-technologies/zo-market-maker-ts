@@ -8,12 +8,31 @@ export interface PositionState {
 	readonly sizeUsd: number;
 	readonly isLong: boolean;
 	readonly isCloseMode: boolean;
+	readonly avgEntryPrice: number;
 }
 
 export interface QuotingContext {
 	readonly fairPrice: number;
 	readonly positionState: PositionState;
 	readonly allowedSides: readonly ("bid" | "ask")[];
+}
+
+export interface PnLState {
+	readonly avgEntryPrice: number;
+	readonly realizedPnL: number;
+	readonly unrealizedPnL: number;
+	readonly fillCount: number;
+	readonly totalVolumeUsd: number;
+}
+
+export interface SessionSummary {
+	readonly uptimeMs: number;
+	readonly fillCount: number;
+	readonly totalVolumeUsd: number;
+	readonly realizedPnL: number;
+	readonly unrealizedPnL: number;
+	readonly netPnL: number;
+	readonly avgSpreadCapturedBps: number;
 }
 
 export interface PositionConfig {
@@ -24,6 +43,11 @@ export interface PositionConfig {
 export class PositionTracker {
 	private baseSize = 0;
 	private isRunning = false;
+	private avgEntryPrice = 0;
+	private realizedPnL = 0;
+	private fillCount = 0;
+	private totalVolumeUsd = 0;
+	private sessionStartTime = Date.now();
 
 	constructor(private readonly config: PositionConfig) {}
 
@@ -75,6 +99,16 @@ export class PositionTracker {
 				log.warn(
 					`Position drift: local=${this.baseSize.toFixed(6)}, server=${serverSize.toFixed(6)}`,
 				);
+				// Reset entry price if direction changed (we lost track)
+				if (
+					(this.baseSize > 0 && serverSize < 0) ||
+					(this.baseSize < 0 && serverSize > 0)
+				) {
+					log.warn(
+						"Position direction changed during sync - resetting entry price",
+					);
+					this.avgEntryPrice = 0;
+				}
 				this.baseSize = serverSize;
 			}
 		} catch (err) {
@@ -82,15 +116,56 @@ export class PositionTracker {
 		}
 	}
 
-	applyFill(side: "bid" | "ask", size: number, _price: number): void {
-		if (side === "bid") {
-			this.baseSize += size;
+	applyFill(side: "bid" | "ask", size: number, price: number): number {
+		const previousBase = this.baseSize;
+		const fillSign = side === "bid" ? 1 : -1;
+
+		this.fillCount++;
+		this.totalVolumeUsd += size * price;
+
+		const isIncreasing =
+			previousBase === 0 ||
+			(previousBase > 0 && fillSign > 0) ||
+			(previousBase < 0 && fillSign < 0);
+
+		let fillRealizedPnL = 0;
+
+		if (isIncreasing) {
+			// Opening or adding: update weighted avg entry
+			const previousCost = Math.abs(previousBase) * this.avgEntryPrice;
+			const fillCost = size * price;
+			const newAbsSize = Math.abs(previousBase) + size;
+			this.avgEntryPrice =
+				newAbsSize > 0 ? (previousCost + fillCost) / newAbsSize : price;
 		} else {
-			this.baseSize -= size;
+			// Reducing or flipping
+			const reducingSize = Math.min(size, Math.abs(previousBase));
+			const remainingSize = size - reducingSize;
+
+			if (previousBase > 0) {
+				fillRealizedPnL = (price - this.avgEntryPrice) * reducingSize;
+			} else {
+				fillRealizedPnL = (this.avgEntryPrice - price) * reducingSize;
+			}
+			this.realizedPnL += fillRealizedPnL;
+
+			if (remainingSize > 0) {
+				// Flipped: remainder opens new position at fill price
+				this.avgEntryPrice = price;
+			} else if (Math.abs(previousBase + size * fillSign) < 1e-10) {
+				// Fully closed
+				this.avgEntryPrice = 0;
+			}
+			// Partially reduced: avgEntryPrice stays the same
 		}
+
+		this.baseSize = previousBase + size * fillSign;
+
 		log.debug(
-			`Position updated: ${this.baseSize.toFixed(6)} (${side} ${size})`,
+			`Position updated: ${this.baseSize.toFixed(6)} (${side} ${size} @ $${price.toFixed(2)}) | entry=$${this.avgEntryPrice.toFixed(2)} | rPnL=$${this.realizedPnL.toFixed(4)}`,
 		);
+
+		return fillRealizedPnL;
 	}
 
 	getQuotingContext(fairPrice: number): QuotingContext {
@@ -114,6 +189,7 @@ export class PositionTracker {
 			sizeUsd,
 			isLong,
 			isCloseMode,
+			avgEntryPrice: this.avgEntryPrice,
 		};
 	}
 
@@ -125,6 +201,39 @@ export class PositionTracker {
 
 		// Normal: both sides
 		return ["bid", "ask"];
+	}
+
+	getUnrealizedPnL(markPrice: number): number {
+		if (this.baseSize === 0 || this.avgEntryPrice === 0) return 0;
+		if (this.baseSize > 0) {
+			return (markPrice - this.avgEntryPrice) * this.baseSize;
+		}
+		return (this.avgEntryPrice - markPrice) * Math.abs(this.baseSize);
+	}
+
+	getRealizedPnL(): number {
+		return this.realizedPnL;
+	}
+
+	getAvgEntryPrice(): number {
+		return this.avgEntryPrice;
+	}
+
+	getSessionSummary(markPrice: number): SessionSummary {
+		const uptimeMs = Date.now() - this.sessionStartTime;
+		const unrealizedPnL = this.getUnrealizedPnL(markPrice);
+		return {
+			uptimeMs,
+			fillCount: this.fillCount,
+			totalVolumeUsd: this.totalVolumeUsd,
+			realizedPnL: this.realizedPnL,
+			unrealizedPnL,
+			netPnL: this.realizedPnL + unrealizedPnL,
+			avgSpreadCapturedBps:
+				this.totalVolumeUsd > 0
+					? (this.realizedPnL / this.totalVolumeUsd) * 10000
+					: 0,
+		};
 	}
 
 	getBaseSize(): number {

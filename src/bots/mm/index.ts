@@ -159,9 +159,17 @@ export class MarketMaker {
 		// Account stream - fill events
 		this.accountStream?.syncOrders(user, accountId);
 		this.accountStream?.setOnFill((fill: FillEvent) => {
-			log.fill(fill.side === "bid" ? "buy" : "sell", fill.price, fill.size);
-			this.positionTracker?.applyFill(fill.side, fill.size, fill.price);
-			// Cancel all orders when entering close mode
+			const fillPnL =
+				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
+
+			log.fill(
+				fill.side === "bid" ? "buy" : "sell",
+				fill.price,
+				fill.size,
+				fillPnL !== 0 ? fillPnL : undefined,
+				this.positionTracker?.getRealizedPnL(),
+			);
+
 			if (this.positionTracker?.isCloseMode(fill.price)) {
 				this.cancelOrdersAsync();
 			}
@@ -285,9 +293,22 @@ export class MarketMaker {
 			this.orderSyncInterval = null;
 		}
 
+		this.accountStream?.close();
+
+		// Log session summary while price feeds are still available
+		const binancePrice = this.binanceFeed?.getMidPrice();
+		const fairPrice = binancePrice
+			? this.fairPriceCalc?.getFairPrice(binancePrice.mid)
+			: null;
+		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
+
+		if (this.positionTracker) {
+			const summary = this.positionTracker.getSessionSummary(markPrice);
+			log.sessionSummary(summary);
+		}
+
 		this.binanceFeed?.close();
 		this.orderbookStream?.close();
-		this.accountStream?.close();
 
 		try {
 			if (this.activeOrders.length > 0 && this.client) {
@@ -321,11 +342,15 @@ export class MarketMaker {
 			const { positionState } = quotingCtx;
 
 			if (positionState.sizeBase !== 0) {
+				const uPnL =
+					this.positionTracker?.getUnrealizedPnL(fairPrice) ?? 0;
 				log.position(
 					positionState.sizeBase,
 					positionState.sizeUsd,
 					positionState.isLong,
 					positionState.isCloseMode,
+					positionState.avgEntryPrice,
+					uPnL,
 				);
 			}
 
@@ -418,8 +443,24 @@ export class MarketMaker {
 		const bidStr = bids.map(formatOrder).join(",") || "-";
 		const askStr = asks.map(formatOrder).join(",") || "-";
 
+		const entry = this.positionTracker?.getAvgEntryPrice() ?? 0;
+		const rPnL = this.positionTracker?.getRealizedPnL() ?? 0;
+
+		// Get fair price for unrealized PnL
+		const binancePrice = this.binanceFeed?.getMidPrice();
+		const fairPrice = binancePrice
+			? this.fairPriceCalc?.getFairPrice(binancePrice.mid)
+			: null;
+		const uPnL = fairPrice
+			? (this.positionTracker?.getUnrealizedPnL(fairPrice) ?? 0)
+			: 0;
+
+		const entryStr = entry > 0 ? ` entry=$${entry.toFixed(2)}` : "";
+		const rSign = rPnL >= 0 ? "+" : "";
+		const uSign = uPnL >= 0 ? "+" : "";
+
 		log.info(
-			`STATUS: pos=${pos.toFixed(5)} | bid=[${bidStr}] | ask=[${askStr}]`,
+			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)} | bid=[${bidStr}] | ask=[${askStr}]`,
 		);
 	}
 }

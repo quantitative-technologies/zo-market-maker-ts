@@ -91,22 +91,47 @@ export const log = {
 		sizeUsd: number,
 		isLong: boolean,
 		isCloseMode: boolean,
+		avgEntryPrice?: number,
+		unrealizedPnL?: number,
 	): void {
 		const dir = isLong ? "LONG" : "SHORT";
 		const mode = isCloseMode ? " [CLOSE MODE]" : "";
+		let extra = "";
+		if (avgEntryPrice && avgEntryPrice > 0) {
+			extra += ` entry=$${avgEntryPrice.toFixed(2)}`;
+		}
+		if (unrealizedPnL !== undefined && sizeBase !== 0) {
+			const sign = unrealizedPnL >= 0 ? "+" : "";
+			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(4)}`;
+		}
 		outputFn(
 			format(
 				"INFO",
-				`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${mode}`,
+				`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`,
 			),
 		);
 	},
 
-	fill(side: "buy" | "sell", price: number, size: number): void {
+	fill(
+		side: "buy" | "sell",
+		price: number,
+		size: number,
+		fillPnL?: number,
+		cumulativeRealizedPnL?: number,
+	): void {
+		let pnlStr = "";
+		if (fillPnL !== undefined && fillPnL !== 0) {
+			const sign = fillPnL >= 0 ? "+" : "";
+			pnlStr += ` | fillPnL ${sign}$${fillPnL.toFixed(4)}`;
+		}
+		if (cumulativeRealizedPnL !== undefined) {
+			const sign = cumulativeRealizedPnL >= 0 ? "+" : "";
+			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(4)}`;
+		}
 		outputFn(
 			format(
 				"INFO",
-				`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}`,
+				`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`,
 			),
 		);
 	},
@@ -124,6 +149,31 @@ export const log = {
 		for (const [key, value] of Object.entries(cfg)) {
 			outputFn(`  ${key}: ${value}`);
 		}
+	},
+
+	sessionSummary(summary: {
+		uptimeMs: number;
+		fillCount: number;
+		totalVolumeUsd: number;
+		realizedPnL: number;
+		unrealizedPnL: number;
+		netPnL: number;
+		avgSpreadCapturedBps: number;
+	}): void {
+		const uptimeMin = (summary.uptimeMs / 60000).toFixed(1);
+		const fmt = (v: number) => {
+			const sign = v >= 0 ? "+" : "";
+			return `${sign}$${v.toFixed(4)}`;
+		};
+		outputFn(format("INFO", "═══ SESSION SUMMARY ═══"));
+		outputFn(format("INFO", `  Uptime:     ${uptimeMin} min`));
+		outputFn(format("INFO", `  Fills:      ${summary.fillCount}`));
+		outputFn(format("INFO", `  Volume:     $${summary.totalVolumeUsd.toFixed(2)}`));
+		outputFn(format("INFO", `  Realized:   ${fmt(summary.realizedPnL)}`));
+		outputFn(format("INFO", `  Unrealized: ${fmt(summary.unrealizedPnL)}`));
+		outputFn(format("INFO", `  Net PnL:    ${fmt(summary.netPnL)}`));
+		outputFn(format("INFO", `  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(2)} bps`));
+		outputFn(format("INFO", "═══════════════════════"));
 	},
 
 	shutdown(): void {
