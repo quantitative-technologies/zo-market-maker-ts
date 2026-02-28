@@ -21,6 +21,7 @@
     "bs58": "^6.0.0",
     "dotenv": "^16.4.7",
     "lodash-es": "^4.17.23",
+    "smol-toml": "^1.6.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

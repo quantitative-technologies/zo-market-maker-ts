@@ -1,12 +1,25 @@
+x-mm-common: &mm-common
+  build: .
+  restart: "no"
+  env_file:
+    - .env
+  volumes:
+    - ./config.toml:/app/config.toml:ro
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "3m"
+      max-file: "3"
+
 services:
+  mm-sol:
+    <<: *mm-common
+    command: ["SOL"]
+
   mm-btc:
-    build: .
+    <<: *mm-common
     command: ["BTC"]
-    restart: "no"
-    env_file:
-      - .env
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "3m"
-        max-file: "3"
+
+  mm-eth:
+    <<: *mm-common
+    command: ["ETH"]
