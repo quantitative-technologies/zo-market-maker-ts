@@ -12,11 +12,13 @@ export interface MarketMakerConfig {
   readonly statusIntervalMs: number // Interval for status display
   readonly fairPriceWindowMs: number // Window for fair price calculation
   readonly positionSyncIntervalMs: number // Interval for position sync
+  readonly staleThresholdMs: number // Consider stream stale after this many ms
+  readonly staleCheckIntervalMs: number // How often to check for staleness
 }
 
 // Default configuration values (symbol must be provided)
 export const DEFAULT_CONFIG: Omit<MarketMakerConfig, 'symbol'> = {
-  spreadBps: 6,
+  spreadBps: 4,
   takeProfitBps: 5,
   orderSizeUsd: 10,
   closeThresholdUsd: 10,
@@ -26,4 +28,6 @@ export const DEFAULT_CONFIG: Omit<MarketMakerConfig, 'symbol'> = {
   statusIntervalMs: 1000,
   fairPriceWindowMs: 5 * 60 * 1000, // 5 minutes
   positionSyncIntervalMs: 5000,
+  staleThresholdMs: 60_000,
+  staleCheckIntervalMs: 10_000,
 }

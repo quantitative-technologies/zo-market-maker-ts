@@ -5,8 +5,6 @@ import { log } from "../utils/logger.js";
 const BINANCE_FUTURES_WS = "wss://fstream.binance.com/ws";
 const PING_INTERVAL_MS = 30_000; // Send ping every 30s
 const PONG_TIMEOUT_MS = 10_000; // Expect pong within 10s
-const STALE_THRESHOLD_MS = 60_000; // Consider stale after 60s without message
-const STALE_CHECK_INTERVAL_MS = 10_000;
 
 export type { MidPrice } from "../types.js";
 
@@ -24,7 +22,11 @@ export class BinancePriceFeed {
 	// Public callback - can be set after construction
 	onPrice: PriceCallback | null = null;
 
-	constructor(symbol: string = "btcusdt") {
+	constructor(
+		symbol: string = "btcusdt",
+		private readonly staleThresholdMs = 60_000,
+		private readonly staleCheckIntervalMs = 10_000,
+	) {
 		this.wsUrl = `${BINANCE_FUTURES_WS}/${symbol.toLowerCase()}@bookTicker`;
 	}
 
@@ -142,13 +144,13 @@ export class BinancePriceFeed {
 			const now = Date.now();
 			const timeSinceMessage = now - this.lastMessageTime;
 
-			if (this.lastMessageTime > 0 && timeSinceMessage > STALE_THRESHOLD_MS) {
+			if (this.lastMessageTime > 0 && timeSinceMessage > this.staleThresholdMs) {
 				log.warn(
 					`Binance stale (${timeSinceMessage}ms since last message). Reconnecting...`,
 				);
 				this.ws?.terminate();
 			}
-		}, STALE_CHECK_INTERVAL_MS);
+		}, this.staleCheckIntervalMs);
 	}
 
 	private stopStaleCheck(): void {

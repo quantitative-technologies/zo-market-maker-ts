@@ -7,8 +7,6 @@ import type { MidPrice, PriceCallback } from "../types.js";
 import { log } from "../utils/logger.js";
 
 const RECONNECT_DELAY_MS = 3000;
-const STALE_THRESHOLD_MS = 60_000; // Consider stale after 60s without update
-const STALE_CHECK_INTERVAL_MS = 10_000;
 const MAX_LEVELS = 100; // Only keep top N levels (we only need BBO)
 
 // Best Bid/Offer for clamping order prices
@@ -126,6 +124,8 @@ export class ZoOrderbookStream {
 		private readonly nord: Nord,
 		private readonly symbol: string,
 		onPrice?: PriceCallback,
+		private readonly staleThresholdMs = 60_000,
+		private readonly staleCheckIntervalMs = 10_000,
 	) {
 		this.onPrice = onPrice ?? null;
 	}
@@ -223,13 +223,13 @@ export class ZoOrderbookStream {
 			const now = Date.now();
 			const timeSinceUpdate = now - this.lastUpdateTime;
 
-			if (this.lastUpdateTime > 0 && timeSinceUpdate > STALE_THRESHOLD_MS) {
+			if (this.lastUpdateTime > 0 && timeSinceUpdate > this.staleThresholdMs) {
 				log.warn(
 					`Zo orderbook stale (${timeSinceUpdate}ms since last update). Reconnecting...`,
 				);
 				this.scheduleReconnect();
 			}
-		}, STALE_CHECK_INTERVAL_MS);
+		}, this.staleCheckIntervalMs);
 	}
 
 	private scheduleReconnect(): void {

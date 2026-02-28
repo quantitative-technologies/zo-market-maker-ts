@@ -30,6 +30,8 @@ export class AccountStream {
 	private onFill: FillCallback | null = null;
 	private isClosing = false;
 	private reconnectTimeout: NodeJS.Timeout | null = null;
+	private lastMessageTime = 0;
+	private staleCheckInterval: NodeJS.Timeout | null = null;
 
 	// For re-sync on reconnect
 	private user: NordUser | null = null;
@@ -37,6 +39,8 @@ export class AccountStream {
 	constructor(
 		private readonly nord: Nord,
 		private readonly accountId: number,
+		private readonly staleThresholdMs = 60_000,
+		private readonly staleCheckIntervalMs = 10_000,
 	) {}
 
 	setOnFill(callback: FillCallback): void {
@@ -50,6 +54,7 @@ export class AccountStream {
 
 		this.subscription = this.nord.subscribeAccount(this.accountId);
 		this.setupEventHandlers();
+		this.startStaleCheck();
 
 		log.info("Account subscription active");
 	}
@@ -58,6 +63,7 @@ export class AccountStream {
 		if (!this.subscription) return;
 
 		this.subscription.on("message", (data: WebSocketAccountUpdate) => {
+			this.lastMessageTime = Date.now();
 			this.handleUpdate(data);
 		});
 
@@ -74,8 +80,39 @@ export class AccountStream {
 		});
 	}
 
+	private startStaleCheck(): void {
+		if (this.staleCheckInterval) return;
+
+		this.staleCheckInterval = setInterval(() => {
+			if (this.isClosing) return;
+
+			const now = Date.now();
+			const timeSinceUpdate = now - this.lastMessageTime;
+
+			if (this.lastMessageTime > 0 && timeSinceUpdate > this.staleThresholdMs) {
+				log.warn(
+					`Account stream stale (${timeSinceUpdate}ms since last update). Reconnecting...`,
+				);
+				this.scheduleReconnect();
+			}
+		}, this.staleCheckIntervalMs);
+	}
+
+	private stopStaleCheck(): void {
+		if (this.staleCheckInterval) {
+			clearInterval(this.staleCheckInterval);
+			this.staleCheckInterval = null;
+		}
+	}
+
 	private scheduleReconnect(): void {
 		if (this.reconnectTimeout) return;
+
+		// Close existing subscription immediately
+		if (this.subscription) {
+			this.subscription.close();
+			this.subscription = null;
+		}
 
 		log.info(`Reconnecting to account stream in ${RECONNECT_DELAY_MS}ms...`);
 		this.reconnectTimeout = setTimeout(() => {
@@ -85,11 +122,7 @@ export class AccountStream {
 	}
 
 	private async reconnect(): Promise<void> {
-		// Close existing subscription
-		if (this.subscription) {
-			this.subscription.close();
-			this.subscription = null;
-		}
+		this.lastMessageTime = 0;
 
 		// Re-sync orders before reconnecting
 		if (this.user) {
@@ -183,6 +216,7 @@ export class AccountStream {
 
 	close(): void {
 		this.isClosing = true;
+		this.stopStaleCheck();
 		if (this.reconnectTimeout) {
 			clearTimeout(this.reconnectTimeout);
 			this.reconnectTimeout = null;

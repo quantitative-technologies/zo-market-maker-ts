@@ -35,6 +35,8 @@ export interface SessionSummary {
 	readonly avgSpreadCapturedBps: number;
 }
 
+type DriftCallback = (sizeDelta: number, newBaseSize: number) => void;
+
 export interface PositionConfig {
 	readonly closeThresholdUsd: number; // Trigger close mode when position >= this
 	readonly syncIntervalMs: number;
@@ -48,8 +50,18 @@ export class PositionTracker {
 	private fillCount = 0;
 	private totalVolumeUsd = 0;
 	private sessionStartTime = Date.now();
+	private onDrift: DriftCallback | null = null;
+	private lastMarkPrice = 0;
 
 	constructor(private readonly config: PositionConfig) {}
+
+	setOnDrift(callback: DriftCallback): void {
+		this.onDrift = callback;
+	}
+
+	setMarkPrice(price: number): void {
+		this.lastMarkPrice = price;
+	}
 
 	startSync(user: NordUser, accountId: number, marketId: number): void {
 		this.isRunning = true;
@@ -95,21 +107,56 @@ export class PositionTracker {
 					: -pos.perp.baseSize
 				: 0;
 
-			if (Math.abs(this.baseSize - serverSize) > 0.0001) {
+			const sizeDelta = serverSize - this.baseSize;
+
+			if (Math.abs(sizeDelta) > 0.0001) {
 				log.warn(
-					`Position drift: local=${this.baseSize.toFixed(6)}, server=${serverSize.toFixed(6)}`,
+					`Position drift detected: local=${this.baseSize.toFixed(6)}, server=${serverSize.toFixed(6)}, delta=${sizeDelta.toFixed(6)}`,
 				);
-				// Reset entry price if direction changed (we lost track)
-				if (
-					(this.baseSize > 0 && serverSize < 0) ||
-					(this.baseSize < 0 && serverSize > 0)
-				) {
-					log.warn(
-						"Position direction changed during sync - resetting entry price",
+
+				// Process as a synthetic fill so PnL tracking stays correct
+				const fillSide: "bid" | "ask" =
+					sizeDelta > 0 ? "bid" : "ask";
+				const fillSize = Math.abs(sizeDelta);
+				const approxPrice = this.lastMarkPrice || 0;
+
+				if (approxPrice > 0) {
+					const fillPnL = this.applyFill(
+						fillSide,
+						fillSize,
+						approxPrice,
 					);
-					this.avgEntryPrice = 0;
+
+					log.fill(
+						fillSide === "bid" ? "buy" : "sell",
+						approxPrice,
+						fillSize,
+						fillPnL !== 0 ? fillPnL : undefined,
+						this.realizedPnL,
+					);
+					log.warn(
+						`Missed fill recovered via sync: ${fillSide} ${fillSize.toFixed(6)} @ ~$${approxPrice.toFixed(2)} (approx)`,
+					);
+				} else {
+					// No price available — force-correct position without PnL
+					log.warn(
+						"No mark price available for missed fill PnL — forcing position sync",
+					);
+					const previousBase = this.baseSize;
+					this.baseSize = serverSize;
+					if (
+						(previousBase > 0 && serverSize < 0) ||
+						(previousBase < 0 && serverSize > 0) ||
+						serverSize === 0
+					) {
+						this.avgEntryPrice = 0;
+					}
 				}
-				this.baseSize = serverSize;
+
+				// Notify bot about drift (e.g., to enter close mode)
+				if (this.onDrift) {
+					this.onDrift(sizeDelta, this.baseSize);
+				}
 			}
 		} catch (err) {
 			log.error("Position sync error:", err);

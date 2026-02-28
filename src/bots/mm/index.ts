@@ -146,9 +146,18 @@ export class MarketMaker {
 		);
 
 		// Initialize streams
-		this.accountStream = new AccountStream(nord, accountId);
-		this.orderbookStream = new ZoOrderbookStream(nord, this.marketSymbol);
-		this.binanceFeed = new BinancePriceFeed(binanceSymbol);
+		this.accountStream = new AccountStream(
+			nord, accountId,
+			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
+		);
+		this.orderbookStream = new ZoOrderbookStream(
+			nord, this.marketSymbol, undefined,
+			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
+		);
+		this.binanceFeed = new BinancePriceFeed(
+			binanceSymbol,
+			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
+		);
 
 		this.isRunning = true;
 	}
@@ -171,6 +180,15 @@ export class MarketMaker {
 			);
 
 			if (this.positionTracker?.isCloseMode(fill.price)) {
+				this.cancelOrdersAsync();
+			}
+		});
+
+		// Position drift handler — cancel orders if drift puts us in close mode
+		this.positionTracker?.setOnDrift((_sizeDelta, _newBaseSize) => {
+			const markPrice = this.binanceFeed?.getMidPrice()?.mid ?? 0;
+			if (markPrice > 0 && this.positionTracker?.isCloseMode(markPrice)) {
+				log.warn("Drift triggered close mode — cancelling orders");
 				this.cancelOrdersAsync();
 			}
 		});
@@ -205,6 +223,9 @@ export class MarketMaker {
 			this.logWarmupProgress(binancePrice);
 			return;
 		}
+
+		// Feed mark price to position tracker for missed-fill PnL
+		this.positionTracker?.setMarkPrice(fairPrice);
 
 		// Log ready on first valid fair price
 		if (this.lastLoggedSampleCount < this.config.warmupSeconds) {
