@@ -194,3 +194,30 @@ export async function cancelOrders(
 	const actions = orders.map((o) => buildCancelAction(o.orderId));
 	await executeAtomic(user, actions);
 }
+
+// Close position with an IOC order at the given price
+export async function closePosition(
+	user: NordUser,
+	marketId: number,
+	baseSize: number,
+	price: string,
+): Promise<void> {
+	if (Math.abs(baseSize) < 1e-10) return;
+
+	// If long, sell to close. If short, buy to close.
+	const side = baseSize > 0 ? Side.Ask : Side.Bid;
+	const size = Math.abs(baseSize).toString();
+
+	const action: UserAtomicSubaction = {
+		kind: "place" as const,
+		marketId,
+		side,
+		fillMode: FillMode.ImmediateOrCancel,
+		isReduceOnly: true,
+		price,
+		size,
+	};
+
+	log.info(`CLOSE POSITION: ${side === Side.Bid ? "BUY" : "SELL"} ${size} @ $${price} [IOC/RO]`);
+	await executeAtomic(user, [action]);
+}

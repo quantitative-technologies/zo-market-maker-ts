@@ -16,6 +16,7 @@ import { ZoOrderbookStream } from "../../sdk/orderbook.js";
 import {
 	type CachedOrder,
 	cancelOrders,
+	closePosition,
 	updateQuotes,
 } from "../../sdk/orders.js";
 import type { MidPrice } from "../../types.js";
@@ -58,6 +59,8 @@ export class MarketMaker {
 	private client: ZoClient | null = null;
 	private marketId = 0;
 	private marketSymbol = "";
+	private priceDecimals = 2;
+	private sizeDecimals = 4;
 	private accountStream: AccountStream | null = null;
 	private orderbookStream: ZoOrderbookStream | null = null;
 	private binanceFeed: BinancePriceFeed | null = null;
@@ -121,6 +124,8 @@ export class MarketMaker {
 		}
 		this.marketId = market.marketId;
 		this.marketSymbol = market.symbol;
+		this.priceDecimals = market.priceDecimals;
+		this.sizeDecimals = market.sizeDecimals;
 
 		const binanceSymbol = deriveBinanceSymbol(market.symbol);
 		this.logConfig(binanceSymbol);
@@ -334,10 +339,27 @@ export class MarketMaker {
 		try {
 			if (this.activeOrders.length > 0 && this.client) {
 				await cancelOrders(this.client.user, this.activeOrders);
-				log.info(`Cancelled ${this.activeOrders.length} orders. Goodbye!`);
+				log.info(`Cancelled ${this.activeOrders.length} orders`);
 				this.activeOrders = [];
+			}
+
+			// Close open position with an aggressive IOC order
+			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
+			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
+				// Use 0.5% slippage for IOC close
+				const slippage = markPrice * 0.005;
+				const closePrice = baseSize > 0
+					? (markPrice - slippage).toFixed(this.priceDecimals)
+					: (markPrice + slippage).toFixed(this.priceDecimals);
+				await closePosition(
+					this.client.user,
+					this.marketId,
+					baseSize,
+					closePrice,
+				);
+				log.info("Position closed. Goodbye!");
 			} else {
-				log.info("No active orders. Goodbye!");
+				log.info("No open position. Goodbye!");
 			}
 		} catch (err) {
 			log.error("Shutdown error:", err);
