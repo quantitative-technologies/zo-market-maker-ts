@@ -321,17 +321,12 @@ export class MarketMaker {
 
 		this.accountStream?.close();
 
-		// Log session summary while price feeds are still available
+		// Capture mark price while feeds are still available
 		const binancePrice = this.binanceFeed?.getMidPrice();
 		const fairPrice = binancePrice
 			? this.fairPriceCalc?.getFairPrice(binancePrice.mid)
 			: null;
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
-
-		if (this.positionTracker) {
-			const summary = this.positionTracker.getSessionSummary(markPrice);
-			log.sessionSummary(summary);
-		}
 
 		this.binanceFeed?.close();
 		this.orderbookStream?.close();
@@ -357,12 +352,17 @@ export class MarketMaker {
 					baseSize,
 					closePrice,
 				);
-				log.info("Position closed. Goodbye!");
+				log.info("Position closed");
 			} else {
-				log.info("No open position. Goodbye!");
+				log.info("No open position");
 			}
 		} catch (err) {
 			log.error("Shutdown error:", err);
+		}
+
+		if (this.positionTracker) {
+			const summary = this.positionTracker.getSessionSummary(markPrice);
+			log.sessionSummary(summary);
 		}
 
 		process.exit(0);
