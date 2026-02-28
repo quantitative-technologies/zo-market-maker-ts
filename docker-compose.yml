@@ -1,7 +1,7 @@
 services:
   mm-btc:
     build: .
-    command: ["SOL"]
+    command: ["ETH"]
     restart: "no"
     env_file:
       - .env
