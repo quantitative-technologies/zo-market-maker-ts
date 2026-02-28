@@ -173,6 +173,8 @@ export class MarketMaker {
 		// Account stream - fill events
 		this.accountStream?.syncOrders(user, accountId);
 		this.accountStream?.setOnFill((fill: FillEvent) => {
+			if (fill.marketId !== this.marketId) return;
+
 			const fillPnL =
 				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
 
