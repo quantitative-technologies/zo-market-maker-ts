@@ -1,0 +1,34 @@
+# Zo Market Maker Configuration
+#
+# Global defaults apply to all symbols.
+# Per-symbol sections override globals for that symbol.
+#
+# Merge order: code defaults → global TOML → [SYMBOL] section
+
+# --- Global defaults ---
+
+spread_bps = 4               # Spread from fair price (basis points)
+take_profit_bps = 5           # Spread in close mode (basis points)
+order_size_usd = 10           # Order size in USD
+close_threshold_usd = 10      # Trigger close mode at this position size (USD)
+warmup_seconds = 10            # Samples needed before quoting
+
+# Uncomment to override timing defaults:
+# update_throttle_ms = 100     # Min interval between quote updates
+# order_sync_interval_ms = 3000
+# status_interval_ms = 1000
+# fair_price_window_ms = 300000  # 5 minutes
+# position_sync_interval_ms = 5000
+
+# --- Per-symbol overrides ---
+
+# [SOL]
+# spread_bps = 6
+# order_size_usd = 15
+
+# [BTC]
+# spread_bps = 3
+# order_size_usd = 20
+
+# [ETH]
+# spread_bps = 5
