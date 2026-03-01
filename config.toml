@@ -32,3 +32,15 @@ warmup_seconds = 10            # Samples needed before quoting
 
 # [ETH]
 # spread_bps = 5
+
+# [HYPE]
+# spread_bps = 8
+# order_size_usd = 10
+
+# [XRP]
+# spread_bps = 6
+# order_size_usd = 10
+
+# [SUI]
+# spread_bps = 7
+# order_size_usd = 10

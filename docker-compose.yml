@@ -23,3 +23,15 @@ services:
   mm-eth:
     <<: *mm-common
     command: ["ETH"]
+
+  mm-hype:
+    <<: *mm-common
+    command: ["HYPE"]
+
+  mm-xrp:
+    <<: *mm-common
+    command: ["XRP"]
+
+  mm-sui:
+    <<: *mm-common
+    command: ["SUI"]
