@@ -2,6 +2,7 @@
 .PHONY: start-sol start-btc start-eth start-hype start-xrp start-sui
 .PHONY: stop-sol stop-btc stop-eth stop-hype stop-xrp stop-sui
 .PHONY: logs-sol logs-btc logs-eth logs-hype logs-xrp logs-sui
+.PHONY: monitor-sol monitor-btc monitor-eth monitor-hype monitor-xrp monitor-sui
 
 build:
 	docker compose build
@@ -79,3 +80,21 @@ logs-xrp:
 
 logs-sui:
 	docker compose logs -f mm-sui
+
+monitor-sol:
+	npm run monitor -- sol
+
+monitor-btc:
+	npm run monitor -- btc
+
+monitor-eth:
+	npm run monitor -- eth
+
+monitor-hype:
+	npm run monitor -- hype
+
+monitor-xrp:
+	npm run monitor -- xrp
+
+monitor-sui:
+	npm run monitor -- sui
