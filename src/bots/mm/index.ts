@@ -300,6 +300,8 @@ export class MarketMaker {
 		}, this.config.orderSyncIntervalMs);
 	}
 
+	private isShuttingDown = false;
+
 	private registerShutdownHandlers(): void {
 		const shutdown = () => this.shutdown();
 		process.on("SIGINT", shutdown);
@@ -307,7 +309,13 @@ export class MarketMaker {
 	}
 
 	private async shutdown(): Promise<void> {
-		log.shutdown();
+		if (this.isShuttingDown) {
+			log.warn("SHUTDOWN: already in progress, ignoring duplicate signal");
+			return;
+		}
+		this.isShuttingDown = true;
+
+		log.info("SHUTDOWN: signal received, starting cleanup...");
 		this.isRunning = false;
 		this.throttledUpdate?.cancel();
 		this.positionTracker?.stopSync();
@@ -321,28 +329,28 @@ export class MarketMaker {
 			this.orderSyncInterval = null;
 		}
 
-		this.accountStream?.close();
-
 		// Capture mark price while feeds are still available
 		const binancePrice = this.binanceFeed?.getMidPrice();
 		const fairPrice = binancePrice
 			? this.fairPriceCalc?.getFairPrice(binancePrice.mid)
 			: null;
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
-
-		this.binanceFeed?.close();
-		this.orderbookStream?.close();
+		log.info(`SHUTDOWN: mark price = ${markPrice}`);
 
 		try {
 			if (this.activeOrders.length > 0 && this.client) {
+				log.info(`SHUTDOWN: cancelling ${this.activeOrders.length} orders...`);
 				await cancelOrders(this.client.user, this.activeOrders);
-				log.info(`Cancelled ${this.activeOrders.length} orders`);
+				log.info("SHUTDOWN: orders cancelled");
 				this.activeOrders = [];
+			} else {
+				log.info(`SHUTDOWN: no active orders (tracked: ${this.activeOrders.length}, client: ${!!this.client})`);
 			}
 
 			// Close open position with an aggressive IOC order
 			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
 			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
+				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
 				// Use 0.5% slippage for IOC close
 				const slippage = markPrice * 0.005;
 				const closePrice = baseSize > 0
@@ -354,19 +362,25 @@ export class MarketMaker {
 					baseSize,
 					closePrice,
 				);
-				log.info("Position closed");
+				log.info("SHUTDOWN: position closed");
 			} else {
-				log.info("No open position");
+				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, client: ${!!this.client}, mark: ${markPrice})`);
 			}
 		} catch (err) {
-			log.error("Shutdown error:", err);
+			log.error("SHUTDOWN: cleanup failed:", err);
 		}
+
+		// Close feeds after cleanup (SDK may need connection for API calls)
+		this.accountStream?.close();
+		this.binanceFeed?.close();
+		this.orderbookStream?.close();
 
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
 			log.sessionSummary(summary);
 		}
 
+		log.info("SHUTDOWN: complete");
 		process.exit(0);
 	}
 
