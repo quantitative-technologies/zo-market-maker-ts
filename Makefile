@@ -3,6 +3,7 @@
 .PHONY: stop-sol stop-btc stop-eth stop-hype stop-xrp stop-sui
 .PHONY: logs-sol logs-btc logs-eth logs-hype logs-xrp logs-sui
 .PHONY: monitor-sol monitor-btc monitor-eth monitor-hype monitor-xrp monitor-sui
+.PHONY: t2t-dist
 
 build:
 	docker compose build
@@ -98,3 +99,6 @@ monitor-xrp:
 
 monitor-sui:
 	npm run monitor -- sui
+
+t2t-dist:
+	./scripts/t2t-dist.sh
