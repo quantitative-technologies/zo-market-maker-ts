@@ -28,7 +28,7 @@ and reconnection, account/fill monitoring, Docker deployment, monitor TUI, struc
 ### 1.3 Tick-to-Trade Latency
 - Capture `performance.now()` on Binance tick receipt (`src/pricing/binance.ts`)
 - Thread timestamp through `MidPrice` → `handleBinancePrice` → `executeUpdate`
-- Measure T2T after `updateQuotes` returns in `executeUpdate`
+- Measure T2T only when `updateQuotes` actually submits orders (no-op ticks excluded)
 - Track rolling stats (last, avg over ~100 samples)
 - Append to STATUS log line: `t2t=Xms avg=Xms`
 - Files: `src/types.ts`, `src/pricing/binance.ts`, `src/bots/mm/index.ts`

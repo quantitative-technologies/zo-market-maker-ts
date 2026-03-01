@@ -76,6 +76,9 @@ export class MarketMaker {
 	> | null = null;
 	private statusInterval: ReturnType<typeof setInterval> | null = null;
 	private orderSyncInterval: ReturnType<typeof setInterval> | null = null;
+	private lastTickTimestamp = 0;
+	private lastT2T = 0;
+	private t2tSamples: number[] = [];
 
 	constructor(
 		private readonly config: MarketMakerConfig,
@@ -215,6 +218,10 @@ export class MarketMaker {
 	}
 
 	private handleBinancePrice(binancePrice: MidPrice): void {
+		if (binancePrice.tickTimestamp !== undefined) {
+			this.lastTickTimestamp = binancePrice.tickTimestamp;
+		}
+
 		const zoPrice = this.orderbookStream?.getMidPrice();
 		if (
 			zoPrice &&
@@ -421,6 +428,7 @@ export class MarketMaker {
 				isClose ? "close" : "normal",
 			);
 
+			const prevOrders = this.activeOrders;
 			const newOrders = await updateQuotes(
 				this.client.user,
 				this.marketId,
@@ -428,6 +436,14 @@ export class MarketMaker {
 				quotes,
 			);
 			this.activeOrders = newOrders;
+
+			// Record T2T only when orders were actually submitted to the exchange
+			if (newOrders !== prevOrders && this.lastTickTimestamp > 0) {
+				const t2t = performance.now() - this.lastTickTimestamp;
+				this.lastT2T = t2t;
+				this.t2tSamples.push(t2t);
+				if (this.t2tSamples.length > 100) this.t2tSamples.shift();
+			}
 		} catch (err) {
 			log.error("Update error:", err);
 			this.activeOrders = [];
@@ -504,8 +520,15 @@ export class MarketMaker {
 		const rSign = rPnL >= 0 ? "+" : "";
 		const uSign = uPnL >= 0 ? "+" : "";
 
+		let t2tStr = "";
+		if (this.lastT2T > 0) {
+			const avg =
+				this.t2tSamples.reduce((a, b) => a + b, 0) / this.t2tSamples.length;
+			t2tStr = ` | t2t=${this.lastT2T.toFixed(1)}ms avg=${avg.toFixed(1)}ms`;
+		}
+
 		log.info(
-			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)} | bid=[${bidStr}] | ask=[${askStr}]`,
+			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
 		);
 	}
 }
