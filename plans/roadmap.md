@@ -25,6 +25,15 @@ and reconnection, account/fill monitoring, Docker deployment, monitor TUI, struc
 - Session summary on shutdown (total fills, net PnL, uptime)
 - Optional: export metrics to file or stdout in structured format
 
+### 1.3 Tick-to-Trade Latency
+- Capture `performance.now()` on Binance tick receipt (`src/pricing/binance.ts`)
+- Thread timestamp through `MidPrice` → `handleBinancePrice` → `executeUpdate`
+- Measure T2T after `updateQuotes` returns in `executeUpdate`
+- Track rolling stats (last, avg over ~100 samples)
+- Append to STATUS log line: `t2t=Xms avg=Xms`
+- Files: `src/types.ts`, `src/pricing/binance.ts`, `src/bots/mm/index.ts`
+- Note: T2T includes throttle delay (~100ms default) which dominates; pure processing is sub-ms
+
 ---
 
 ## Phase 2: Configuration & Deployment
