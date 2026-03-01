@@ -12,6 +12,22 @@ and reconnection, account/fill monitoring, Docker deployment, monitor TUI, struc
 
 ---
 
+## Phase 0: Testing & Benchmarks
+
+### 0.1 Benchmark Regression Testing
+- Install vitest with bench support
+- Microbenchmarks for hot path: logger, fair price calc, quoter, order matching
+- `make bench` target for quick before/after comparison
+- See: plans/benchmark-regression.md
+
+### 0.2 Colored Logging (tslog)
+- Replace custom logger with tslog for colored terminal output
+- Dual path: ANSI colors in terminal, plain text in TUI mode
+- Zero API changes to consumer files
+- See: plans/tslog-colored-logging.md
+
+---
+
 ## Phase 1: Observability & Logging
 
 ### 1.1 Fill & PnL Logging
