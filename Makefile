@@ -12,10 +12,10 @@ start:
 	docker compose up -d --build
 
 stop:
-	docker compose down
+	docker compose stop
 
 restart:
-	docker compose down
+	docker compose stop
 	docker compose up -d --build
 
 logs:
