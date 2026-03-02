@@ -337,6 +337,7 @@ export class MarketMaker {
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
 		log.info(`SHUTDOWN: mark price = ${markPrice}`);
 
+		// Cancel orders — ignore ORDER_NOT_FOUND (already filled/expired)
 		try {
 			if (this.activeOrders.length > 0 && this.client) {
 				log.info(`SHUTDOWN: cancelling ${this.activeOrders.length} orders...`);
@@ -346,12 +347,15 @@ export class MarketMaker {
 			} else {
 				log.info(`SHUTDOWN: no active orders (tracked: ${this.activeOrders.length}, client: ${!!this.client})`);
 			}
+		} catch (err) {
+			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
+		}
 
-			// Close open position with an aggressive IOC order
+		// Close open position — independent of order cancellation
+		try {
 			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
 			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
 				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
-				// Use 0.5% slippage for IOC close
 				const slippage = markPrice * 0.005;
 				const closePrice = baseSize > 0
 					? (markPrice - slippage).toFixed(this.priceDecimals)
@@ -367,7 +371,7 @@ export class MarketMaker {
 				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, client: ${!!this.client}, mark: ${markPrice})`);
 			}
 		} catch (err) {
-			log.error("SHUTDOWN: cleanup failed:", err);
+			log.error("SHUTDOWN: close position failed:", err);
 		}
 
 		// Close feeds after cleanup (SDK may need connection for API calls)
