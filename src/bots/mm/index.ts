@@ -22,6 +22,7 @@ import {
 import type { MidPrice } from "../../types.js";
 import { log } from "../../utils/logger.js";
 import { type BalanceConfig, BalanceTracker } from "./balance.js";
+import { AnalyticsTracker } from "./analytics.js";
 import type { MarketMakerConfig } from "./config.js";
 import { type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
@@ -95,6 +96,7 @@ export class MarketMaker {
 	private fairPriceCalc: FairPriceProvider | null = null;
 	private positionTracker: PositionTracker | null = null;
 	private balanceTracker: BalanceTracker | null = null;
+	private analytics: AnalyticsTracker | null = null;
 	private quoter: Quoter | null = null;
 	private isRunning = false;
 	private lastLoggedSampleCount = -1;
@@ -174,6 +176,14 @@ export class MarketMaker {
 
 		this.fairPriceCalc = new FairPriceCalculator(fairPriceConfig);
 		this.positionTracker = new PositionTracker(positionConfig);
+		this.analytics = new AnalyticsTracker(
+			() => {
+				const bp = this.binanceFeed?.getMidPrice();
+				if (!bp) return null;
+				return this.fairPriceCalc?.getFairPrice(bp.mid) ?? bp.mid ?? null;
+			},
+			this.config.markoutHorizonsMs,
+		);
 		this.quoter = new Quoter(
 			market.priceDecimals,
 			market.sizeDecimals,
@@ -224,6 +234,12 @@ export class MarketMaker {
 				fillPnL !== 0 ? fillPnL : undefined,
 				this.positionTracker?.getRealizedPnL(),
 			);
+
+			const fairPrice = this.binanceFeed?.getMidPrice()?.mid;
+			const markPrice = fairPrice
+				? (this.fairPriceCalc?.getFairPrice(fairPrice) ?? fairPrice)
+				: fill.price;
+			this.analytics?.recordFill(fill.side, fill.size, fill.price, markPrice);
 
 			if (this.positionTracker?.isCloseMode(fill.price)) {
 				this.cancelOrdersAsync();
@@ -431,6 +447,13 @@ export class MarketMaker {
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
 			log.sessionSummary(summary);
+
+			if (this.analytics) {
+				const analyticsSummary = this.analytics.getSummary(summary.fillCount);
+				log.analyticsSummary(analyticsSummary);
+				const filename = `fills-${this.config.symbol}-${Date.now()}.jsonl`;
+				this.analytics.writeFillsToFile(filename);
+			}
 		}
 
 		if (this.balanceTracker) {
@@ -501,12 +524,15 @@ export class MarketMaker {
 			);
 			this.activeOrders = newOrders;
 
-			// Record T2T only when orders were actually submitted to the exchange
-			if (newOrders !== prevOrders && this.lastTickTimestamp > 0) {
-				const t2t = performance.now() - this.lastTickTimestamp;
-				this.lastT2T = t2t;
-				this.t2tSamples.push(t2t);
-				if (this.t2tSamples.length > 100) this.t2tSamples.shift();
+			// Record T2T and analytics only when orders were actually submitted
+			if (newOrders !== prevOrders) {
+				this.analytics?.recordQuoteUpdate();
+				if (this.lastTickTimestamp > 0) {
+					const t2t = performance.now() - this.lastTickTimestamp;
+					this.lastT2T = t2t;
+					this.t2tSamples.push(t2t);
+					if (this.t2tSamples.length > 100) this.t2tSamples.shift();
+				}
 			}
 		} catch (err) {
 			const kind = classifyAtomicError(err);

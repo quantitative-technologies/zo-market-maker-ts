@@ -281,6 +281,29 @@ export const log = {
 		this.info("═══════════════════════");
 	},
 
+	analyticsSummary(summary: {
+		markouts: Array<{ horizonMs: number; count: number; avgBps: number }>;
+		fillRate: number;
+		quoteUpdateCount: number;
+	}): void {
+		this.info("── ANALYTICS ──");
+		this.info(`  Quote Updates: ${summary.quoteUpdateCount}`);
+		this.info(`  Fill Rate:     ${(summary.fillRate * 100).toFixed(2)}%`);
+		this.info("  Markouts:");
+		for (const m of summary.markouts) {
+			const label =
+				m.horizonMs >= 1000
+					? `${m.horizonMs / 1000}s`
+					: `${m.horizonMs}ms`;
+			const sign = m.avgBps >= 0 ? "+" : "";
+			const countStr = m.count > 0 ? `(n=${m.count})` : "(no data)";
+			this.info(
+				`    ${label.padStart(4)}: ${sign}${m.avgBps.toFixed(2)} bps ${countStr}`,
+			);
+		}
+		this.info("───────────────");
+	},
+
 	shutdown(): void {
 		this.info("Shutting down...");
 	},

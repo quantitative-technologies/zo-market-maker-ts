@@ -23,6 +23,7 @@ export interface MarketMakerConfig {
   readonly staleThresholdMs: number // Consider stream stale after this many ms
   readonly staleCheckIntervalMs: number // How often to check for staleness
   readonly balanceSyncIntervalMs: number // Interval for balance tracking sync
+  readonly markoutHorizonsMs: readonly number[] // Markout observation horizons (ms)
 }
 
 // snake_case TOML key → camelCase config field
@@ -51,7 +52,7 @@ const REQUIRED_KEYS = Object.keys(KEY_MAP);
 function extractValues(
   section: Record<string, unknown>,
 ): Partial<Omit<MarketMakerConfig, 'symbol'>> {
-  const values: Record<string, number> = {};
+  const values: Record<string, unknown> = {};
   for (const [tomlKey, configKey] of Object.entries(KEY_MAP)) {
     const val = section[tomlKey];
     if (val !== undefined) {
@@ -61,6 +62,16 @@ function extractValues(
       values[configKey] = val;
     }
   }
+
+  // Array fields
+  const horizons = section["markout_horizons_ms"];
+  if (horizons !== undefined) {
+    if (!Array.isArray(horizons) || !horizons.every((v) => typeof v === "number")) {
+      throw new Error(`Config key "markout_horizons_ms" must be an array of numbers`);
+    }
+    values["markoutHorizonsMs"] = horizons;
+  }
+
   return values;
 }
 
@@ -91,6 +102,13 @@ export function loadConfig(symbol: string, configPath?: string): MarketMakerConf
   if (missing.length > 0) {
     throw new Error(
       `Missing required config keys in ${filePath}: ${missing.join(", ")}`,
+    );
+  }
+
+  // Validate array fields
+  if (!merged["markoutHorizonsMs"]) {
+    throw new Error(
+      `Missing required config key in ${filePath}: markout_horizons_ms`,
     );
   }
 

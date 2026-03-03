@@ -22,6 +22,9 @@ stale_threshold_ms = 60000     # Consider stream stale after this many ms
 stale_check_interval_ms = 10000    # How often to check for staleness
 balance_sync_interval_ms = 30000   # Interval for balance tracking sync
 
+# Markout observation horizons (ms) for adverse selection analysis
+# markout_horizons_ms = [1000, 5000, 30_000, 60_000, 120_000]
+
 # --- Per-symbol overrides ---
 
 # [SOL]
