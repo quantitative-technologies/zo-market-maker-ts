@@ -1,5 +1,8 @@
-// Simple logger with millisecond precision
-// Format: timestamp [LEVEL] CATEGORY: message
+// Colored logger with millisecond precision
+// Terminal mode: tslog "pretty" for ANSI-colored output
+// TUI mode (setOutput called): plain text formatting (no ANSI codes)
+
+import { Logger } from "tslog";
 
 type LogOutput = (message: string) => void;
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -11,9 +14,32 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
 	error: 3,
 };
 
-let outputFn: LogOutput = (msg) => console.log(msg);
-let errorFn: LogOutput = (msg) => console.error(msg);
+// tslog uses: 0=silly, 1=trace, 2=debug, 3=info, 4=warn, 5=error, 6=fatal
+const TSLOG_LEVEL: Record<LogLevel, number> = {
+	debug: 2,
+	info: 3,
+	warn: 4,
+	error: 5,
+};
+
+let customOutput: LogOutput | null = null;
 let minLevel: LogLevel = (process.env.LOG_LEVEL as LogLevel) || "info";
+
+const tsLogger = new Logger({
+	type: "pretty",
+	hideLogPositionForProduction: true,
+	stylePrettyLogs: true,
+	prettyLogTimeZone: "UTC",
+	prettyLogTemplate:
+		"{{yyyy}}-{{mm}}-{{dd}}T{{hh}}:{{MM}}:{{ss}}.{{ms}}Z\t{{logLevelName}}\t",
+	minLevel: TSLOG_LEVEL[minLevel],
+});
+
+function shouldLog(level: LogLevel): boolean {
+	return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[minLevel];
+}
+
+// --- Plain text formatting (TUI mode, no ANSI codes) ---
 
 function timestamp(): string {
 	return new Date().toISOString();
@@ -29,46 +55,68 @@ function formatArg(a: unknown): string {
 	return String(a);
 }
 
-function format(level: string, message: string, ...args: unknown[]): string {
+function formatPlain(
+	level: string,
+	message: string,
+	...args: unknown[]
+): string {
 	const argStr = args.length > 0 ? ` ${args.map(formatArg).join(" ")}` : "";
 	return `${timestamp()} [${level}] ${message}${argStr}`;
 }
 
-function shouldLog(level: LogLevel): boolean {
-	return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[minLevel];
+function formatMessage(message: string, ...args: unknown[]): string {
+	if (args.length === 0) return message;
+	return `${message} ${args.map(formatArg).join(" ")}`;
 }
 
 export const log = {
 	setOutput(fn: LogOutput): void {
-		outputFn = fn;
-		errorFn = fn;
+		customOutput = fn;
 	},
 
 	setLevel(level: LogLevel): void {
 		minLevel = level;
+		tsLogger.settings.minLevel = TSLOG_LEVEL[level];
 	},
 
 	info(message: string, ...args: unknown[]): void {
 		if (!shouldLog("info")) return;
-		outputFn(format("INFO", message, ...args));
+		if (customOutput) {
+			customOutput(formatPlain("INFO", message, ...args));
+		} else {
+			tsLogger.info(formatMessage(message, ...args));
+		}
 	},
 
 	warn(message: string, ...args: unknown[]): void {
 		if (!shouldLog("warn")) return;
-		outputFn(format("WARN", message, ...args));
+		if (customOutput) {
+			customOutput(formatPlain("WARN", message, ...args));
+		} else {
+			tsLogger.warn(formatMessage(message, ...args));
+		}
 	},
 
 	error(message: string, ...args: unknown[]): void {
 		if (!shouldLog("error")) return;
-		errorFn(format("ERROR", message, ...args));
+		if (customOutput) {
+			customOutput(formatPlain("ERROR", message, ...args));
+		} else {
+			tsLogger.error(formatMessage(message, ...args));
+		}
 	},
 
 	debug(message: string, ...args: unknown[]): void {
 		if (!shouldLog("debug")) return;
-		outputFn(format("DEBUG", message, ...args));
+		if (customOutput) {
+			customOutput(formatPlain("DEBUG", message, ...args));
+		} else {
+			tsLogger.debug(formatMessage(message, ...args));
+		}
 	},
 
-	// MM specific logs - all use INFO level with category prefix
+	// --- Domain-specific methods (route through info) ---
+
 	quote(
 		bid: number | null,
 		ask: number | null,
@@ -78,11 +126,8 @@ export const log = {
 	): void {
 		const bidStr = bid !== null ? `$${bid.toFixed(2)}` : "--";
 		const askStr = ask !== null ? `$${ask.toFixed(2)}` : "--";
-		outputFn(
-			format(
-				"INFO",
-				`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(2)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}`,
-			),
+		this.info(
+			`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(2)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}`,
 		);
 	},
 
@@ -104,11 +149,8 @@ export const log = {
 			const sign = unrealizedPnL >= 0 ? "+" : "";
 			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(4)}`;
 		}
-		outputFn(
-			format(
-				"INFO",
-				`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`,
-			),
+		this.info(
+			`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`,
 		);
 	},
 
@@ -128,26 +170,32 @@ export const log = {
 			const sign = cumulativeRealizedPnL >= 0 ? "+" : "";
 			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(4)}`;
 		}
-		outputFn(
-			format(
-				"INFO",
-				`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`,
-			),
+		this.info(
+			`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`,
 		);
 	},
 
 	banner(): void {
-		outputFn(`
+		const text = `
 ╔═══════════════════════════════════════╗
 ║         ZO MARKET MAKER BOT           ║
 ╚═══════════════════════════════════════╝
-`);
+`;
+		if (customOutput) {
+			customOutput(text);
+		} else {
+			console.log(text);
+		}
 	},
 
 	config(cfg: Record<string, unknown>): void {
-		outputFn(format("INFO", "CONFIG:"));
+		this.info("CONFIG:");
 		for (const [key, value] of Object.entries(cfg)) {
-			outputFn(`  ${key}: ${value}`);
+			if (customOutput) {
+				customOutput(`  ${key}: ${value}`);
+			} else {
+				console.log(`  ${key}: ${value}`);
+			}
 		}
 	},
 
@@ -165,18 +213,18 @@ export const log = {
 			const sign = v >= 0 ? "+" : "";
 			return `${sign}$${v.toFixed(4)}`;
 		};
-		outputFn(format("INFO", "═══ SESSION SUMMARY ═══"));
-		outputFn(format("INFO", `  Uptime:     ${uptimeMin} min`));
-		outputFn(format("INFO", `  Fills:      ${summary.fillCount}`));
-		outputFn(format("INFO", `  Volume:     $${summary.totalVolumeUsd.toFixed(2)}`));
-		outputFn(format("INFO", `  Realized:   ${fmt(summary.realizedPnL)}`));
-		outputFn(format("INFO", `  Unrealized: ${fmt(summary.unrealizedPnL)}`));
-		outputFn(format("INFO", `  Net PnL:    ${fmt(summary.netPnL)}`));
-		outputFn(format("INFO", `  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(2)} bps`));
-		outputFn(format("INFO", "═══════════════════════"));
+		this.info("═══ SESSION SUMMARY ═══");
+		this.info(`  Uptime:     ${uptimeMin} min`);
+		this.info(`  Fills:      ${summary.fillCount}`);
+		this.info(`  Volume:     $${summary.totalVolumeUsd.toFixed(2)}`);
+		this.info(`  Realized:   ${fmt(summary.realizedPnL)}`);
+		this.info(`  Unrealized: ${fmt(summary.unrealizedPnL)}`);
+		this.info(`  Net PnL:    ${fmt(summary.netPnL)}`);
+		this.info(`  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(2)} bps`);
+		this.info("═══════════════════════");
 	},
 
 	shutdown(): void {
-		outputFn(format("INFO", "Shutting down..."));
+		this.info("Shutting down...");
 	},
 };

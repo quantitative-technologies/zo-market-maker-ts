@@ -24,6 +24,7 @@
     "dotenv": "^16.4.7",
     "lodash-es": "^4.17.23",
     "smol-toml": "^1.6.0",
+    "tslog": "^4.10.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
