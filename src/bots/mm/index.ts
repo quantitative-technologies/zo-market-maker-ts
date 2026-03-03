@@ -277,10 +277,7 @@ export class MarketMaker {
 			(o) => o.marketId === this.marketId,
 		);
 		this.activeOrders = mapApiOrdersToCached(marketOrders);
-
-		if (this.activeOrders.length > 0) {
-			log.info(`Synced ${this.activeOrders.length} existing orders`);
-		}
+		log.info(`Synced ${this.activeOrders.length} existing orders`);
 
 		// Start position sync
 		this.positionTracker?.startSync(user, accountId, this.marketId);
@@ -403,7 +400,7 @@ export class MarketMaker {
 			const quotes = this.quoter.getQuotes(quotingCtx, bbo);
 
 			if (quotes.length === 0) {
-				log.warn("No quotes generated (order size too small)");
+				log.debug("No quotes generated (order size too small)");
 				return;
 			}
 

@@ -97,11 +97,33 @@ async function executeAtomic(
 		);
 
 		const result = (await user.atomic(chunk)) as AtomicResult;
+		log.debug(`ATOMIC: raw result ${JSON.stringify(result)}`);
+
 		const placed = extractPlacedOrders(result, chunk);
 		allOrders.push(...placed);
 
+		const placeCount = chunk.filter((a) => a.kind === "place").length;
+		const cancelCount = chunk.filter((a) => a.kind === "cancel").length;
+
+		if (placeCount > 0) {
+			const cancelledStr =
+				cancelCount > 0 ? `, ${cancelCount} cancelled` : "";
+			if (placed.length === placeCount) {
+				log.info(
+					`ATOMIC: ${placed.length}/${placeCount} placed${cancelledStr}`,
+				);
+			} else {
+				const rejected = placeCount - placed.length;
+				log.warn(
+					`ATOMIC: ${placed.length}/${placeCount} placed (${rejected} rejected)${cancelledStr}`,
+				);
+			}
+		} else if (cancelCount > 0) {
+			log.info(`ATOMIC: ${cancelCount} cancelled`);
+		}
+
 		if (placed.length > 0) {
-			log.debug(`ATOMIC: placed [${placed.map((o) => o.orderId).join(", ")}]`);
+			log.debug(`ATOMIC: ids [${placed.map((o) => o.orderId).join(", ")}]`);
 		}
 	}
 
