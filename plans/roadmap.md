@@ -41,6 +41,14 @@ and reconnection, account/fill monitoring, Docker deployment, monitor TUI, struc
 - Session summary on shutdown (total fills, net PnL, uptime)
 - Optional: export metrics to file or stdout in structured format
 
+### 1.4 Mark-to-Market Analysis
+- **MTM P&L snapshots** — periodic equity curve sampling (e.g., every 10s) to track P&L over time, not just on fills
+- **Spread capture** — actual realized spread per round-trip vs quoted spread (bps)
+- **Inventory half-life** — median time from fill to position reduction (long half-life = adverse selection risk)
+- **Markouts** — P&L of each fill marked-to-market at fixed horizons (1s, 5s, 30s, 60s) after the fill; the standard measure of adverse selection. Negative markouts = toxic flow picking you off, positive = you're quoting at good prices
+- **Fill rate** — ratio of fills to quotes placed (too high = spread too tight, too low = not competitive)
+- Persist snapshots to file (CSV/JSON) for post-session analysis
+
 ### 1.3 Tick-to-Trade Latency
 - Capture `performance.now()` on Binance tick receipt (`src/pricing/binance.ts`)
 - Thread timestamp through `MidPrice` → `handleBinancePrice` → `executeUpdate`
