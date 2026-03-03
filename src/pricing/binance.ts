@@ -45,6 +45,7 @@ export class BinancePriceFeed {
 		});
 
 		this.ws.on("message", (data: Buffer) => {
+			const tickTimestamp = performance.now();
 			this.lastMessageTime = Date.now();
 			try {
 				const msg = JSON.parse(data.toString()) as {
@@ -61,6 +62,7 @@ export class BinancePriceFeed {
 					bid,
 					ask,
 					timestamp: Date.now(),
+					tickTimestamp,
 				};
 
 				if (this.onPrice) {

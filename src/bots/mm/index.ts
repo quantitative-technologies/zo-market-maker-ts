@@ -76,6 +76,9 @@ export class MarketMaker {
 	> | null = null;
 	private statusInterval: ReturnType<typeof setInterval> | null = null;
 	private orderSyncInterval: ReturnType<typeof setInterval> | null = null;
+	private lastTickTimestamp = 0;
+	private lastT2T = 0;
+	private t2tSamples: number[] = [];
 
 	constructor(
 		private readonly config: MarketMakerConfig,
@@ -215,6 +218,10 @@ export class MarketMaker {
 	}
 
 	private handleBinancePrice(binancePrice: MidPrice): void {
+		if (binancePrice.tickTimestamp !== undefined) {
+			this.lastTickTimestamp = binancePrice.tickTimestamp;
+		}
+
 		const zoPrice = this.orderbookStream?.getMidPrice();
 		if (
 			zoPrice &&
@@ -297,6 +304,8 @@ export class MarketMaker {
 		}, this.config.orderSyncIntervalMs);
 	}
 
+	private isShuttingDown = false;
+
 	private registerShutdownHandlers(): void {
 		const shutdown = () => this.shutdown();
 		process.on("SIGINT", shutdown);
@@ -304,7 +313,13 @@ export class MarketMaker {
 	}
 
 	private async shutdown(): Promise<void> {
-		log.shutdown();
+		if (this.isShuttingDown) {
+			log.warn("SHUTDOWN: already in progress, ignoring duplicate signal");
+			return;
+		}
+		this.isShuttingDown = true;
+
+		log.info("SHUTDOWN: signal received, starting cleanup...");
 		this.isRunning = false;
 		this.throttledUpdate?.cancel();
 		this.positionTracker?.stopSync();
@@ -318,29 +333,33 @@ export class MarketMaker {
 			this.orderSyncInterval = null;
 		}
 
-		this.accountStream?.close();
-
 		// Capture mark price while feeds are still available
 		const binancePrice = this.binanceFeed?.getMidPrice();
 		const fairPrice = binancePrice
 			? this.fairPriceCalc?.getFairPrice(binancePrice.mid)
 			: null;
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
+		log.info(`SHUTDOWN: mark price = ${markPrice}`);
 
-		this.binanceFeed?.close();
-		this.orderbookStream?.close();
-
+		// Cancel orders — ignore ORDER_NOT_FOUND (already filled/expired)
 		try {
 			if (this.activeOrders.length > 0 && this.client) {
+				log.info(`SHUTDOWN: cancelling ${this.activeOrders.length} orders...`);
 				await cancelOrders(this.client.user, this.activeOrders);
-				log.info(`Cancelled ${this.activeOrders.length} orders`);
+				log.info("SHUTDOWN: orders cancelled");
 				this.activeOrders = [];
+			} else {
+				log.info(`SHUTDOWN: no active orders (tracked: ${this.activeOrders.length}, client: ${!!this.client})`);
 			}
+		} catch (err) {
+			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
+		}
 
-			// Close open position with an aggressive IOC order
+		// Close open position — independent of order cancellation
+		try {
 			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
 			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
-				// Use 0.5% slippage for IOC close
+				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
 				const slippage = markPrice * 0.005;
 				const closePrice = baseSize > 0
 					? (markPrice - slippage).toFixed(this.priceDecimals)
@@ -351,19 +370,25 @@ export class MarketMaker {
 					baseSize,
 					closePrice,
 				);
-				log.info("Position closed");
+				log.info("SHUTDOWN: position closed");
 			} else {
-				log.info("No open position");
+				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, client: ${!!this.client}, mark: ${markPrice})`);
 			}
 		} catch (err) {
-			log.error("Shutdown error:", err);
+			log.error("SHUTDOWN: close position failed:", err);
 		}
+
+		// Close feeds after cleanup (SDK may need connection for API calls)
+		this.accountStream?.close();
+		this.binanceFeed?.close();
+		this.orderbookStream?.close();
 
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
 			log.sessionSummary(summary);
 		}
 
+		log.info("SHUTDOWN: complete");
 		process.exit(0);
 	}
 
@@ -418,6 +443,7 @@ export class MarketMaker {
 				isClose ? "close" : "normal",
 			);
 
+			const prevOrders = this.activeOrders;
 			const newOrders = await updateQuotes(
 				this.client.user,
 				this.marketId,
@@ -425,6 +451,14 @@ export class MarketMaker {
 				quotes,
 			);
 			this.activeOrders = newOrders;
+
+			// Record T2T only when orders were actually submitted to the exchange
+			if (newOrders !== prevOrders && this.lastTickTimestamp > 0) {
+				const t2t = performance.now() - this.lastTickTimestamp;
+				this.lastT2T = t2t;
+				this.t2tSamples.push(t2t);
+				if (this.t2tSamples.length > 100) this.t2tSamples.shift();
+			}
 		} catch (err) {
 			log.error("Update error:", err);
 			this.activeOrders = [];
@@ -501,8 +535,15 @@ export class MarketMaker {
 		const rSign = rPnL >= 0 ? "+" : "";
 		const uSign = uPnL >= 0 ? "+" : "";
 
+		let t2tStr = "";
+		if (this.lastT2T > 0) {
+			const avg =
+				this.t2tSamples.reduce((a, b) => a + b, 0) / this.t2tSamples.length;
+			t2tStr = ` | t2t=${this.lastT2T.toFixed(1)}ms avg=${avg.toFixed(1)}ms`;
+		}
+
 		log.info(
-			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)} | bid=[${bidStr}] | ask=[${askStr}]`,
+			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
 		);
 	}
 }

@@ -7,6 +7,7 @@ export interface MidPrice {
 	bid: number;
 	ask: number;
 	timestamp: number;
+	tickTimestamp?: number; // performance.now() at tick receipt
 }
 
 export type PriceCallback = (price: MidPrice) => void;
