@@ -10,7 +10,9 @@
     "monitor": "node --import tsx src/cli/monitor.ts",
     "check": "biome check src",
     "format": "biome format --write src",
-    "lint": "biome lint src"
+    "lint": "biome lint src",
+    "bench": "vitest bench",
+    "bench:run": "vitest bench --run"
   },
   "author": "",
   "license": "MIT",
@@ -31,7 +33,8 @@
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
   },
   "engines": {
     "node": ">=25.0.0"

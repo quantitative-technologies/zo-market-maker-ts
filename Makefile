@@ -1,4 +1,4 @@
-.PHONY: build start stop restart logs ps clean
+.PHONY: build start stop restart logs ps clean bench
 .PHONY: start-sol start-btc start-eth
 .PHONY: stop-sol stop-btc stop-eth
 .PHONY: logs-sol logs-btc logs-eth
@@ -52,3 +52,6 @@ logs-btc:
 
 logs-eth:
 	docker compose logs -f mm-eth
+
+bench:
+	npm run bench:run

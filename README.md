@@ -146,7 +146,18 @@ npm run monitor -- btc
 
 # Build
 npm run build
+
+# Run benchmarks (watch mode)
+npm run bench
+
+# Run benchmarks (single run, CI-friendly)
+npm run bench:run
+
+# Or via make
+make bench
 ```
+
+Benchmarks cover the tick-to-trade hot path — see [docs/t2t-hot-path.md](docs/t2t-hot-path.md) for details.
 
 ## Docker
 
