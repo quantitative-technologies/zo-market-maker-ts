@@ -97,7 +97,7 @@ async function executeAtomic(
 		);
 
 		const result = (await user.atomic(chunk)) as AtomicResult;
-		log.debug(`ATOMIC: raw result ${JSON.stringify(result)}`);
+		log.debug(`ATOMIC: raw result ${JSON.stringify(result, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`);
 
 		const placed = extractPlacedOrders(result, chunk);
 		allOrders.push(...placed);
