@@ -46,6 +46,33 @@ function mapApiOrdersToCached(orders: ApiOrder[]): CachedOrder[] {
 	}));
 }
 
+// Classify atomic errors by inspecting SDK cause chain.
+// Positively identifies known-safe cases; everything else is a network error
+// where exchange state is unknown.
+// SDK paths:
+//   Exchange rejection: NordError("Atomic operation failed") → cause: Error("Could not execute ...")
+//   HTTP error:         NordError("Atomic operation failed") → cause: Error("Failed to ...")
+//   Client validation:  NordError("Account ID is undefined" | "Market X not found") — no wrapping
+//   Network error:      NordError("Atomic operation failed") → cause: native Error (fetch failure)
+type AtomicErrorKind = "exchange_rejection" | "http_error" | "client_error" | "network_error";
+
+function classifyAtomicError(err: unknown): AtomicErrorKind {
+	if (!(err instanceof Error)) return "network_error";
+
+	const cause = (err as { cause?: unknown }).cause;
+
+	// Client-side validation errors are thrown directly (not wrapped as "Atomic operation failed")
+	if (err.message !== "Atomic operation failed") return "client_error";
+
+	if (cause instanceof Error) {
+		const msg = cause.message;
+		if (msg.startsWith("Could not execute")) return "exchange_rejection";
+		if (msg.startsWith("Failed to")) return "http_error";
+	}
+
+	return "network_error";
+}
+
 // Derive Binance symbol from market symbol (e.g., "BTC-PERP" → "btcusdt")
 function deriveBinanceSymbol(marketSymbol: string): string {
 	const baseSymbol = marketSymbol
@@ -460,8 +487,21 @@ export class MarketMaker {
 				if (this.t2tSamples.length > 100) this.t2tSamples.shift();
 			}
 		} catch (err) {
-			log.error("Update error:", err);
-			this.activeOrders = [];
+			const kind = classifyAtomicError(err);
+			switch (kind) {
+				case "exchange_rejection":
+					log.warn("Atomic rejected by exchange, will retry next cycle:", err);
+					break;
+				case "http_error":
+					log.error("HTTP error in atomic — exchange state unchanged:", err);
+					break;
+				case "client_error":
+					log.error("Client-side error — nothing sent to exchange:", err);
+					break;
+				case "network_error":
+					log.error("NETWORK ERROR in update — exchange state unknown, awaiting periodic sync:", err);
+					break;
+			}
 		} finally {
 			this.isUpdating = false;
 		}
