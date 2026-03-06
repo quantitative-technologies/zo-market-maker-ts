@@ -11,6 +11,8 @@
 
 - Never hardcode constants (intervals, thresholds, sizes, slippage, etc.) without explicit approval. All tuneable values must be loaded from `config.toml`.
 - Never use magic numbers in constructor calls, function arguments, or default parameter values. All tuneable values must either come from config or be defined as named constants.
+- No hardcoded default values for config keys. All config values must be explicitly specified in `config.toml`. Missing keys must cause a startup error, not silently fall back to a default.
+- Strategy parameters (spread, size, thresholds) come first in config.toml, followed by operational parameters (intervals, timeouts). New config keys must follow this ordering.
 
 ## Error Handling
 

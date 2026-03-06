@@ -1,16 +1,20 @@
-// MarketMaker configuration
+// MarketMaker configuration — all values must be specified in config.toml
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { parse as parseTOML } from "smol-toml";
 import { log } from "../../utils/logger.js";
 
 export interface MarketMakerConfig {
   readonly symbol: string // e.g., "BTC" or "ETH"
+
+  // Strategy parameters
   readonly spreadBps: number // Spread from fair price (bps)
   readonly takeProfitBps: number // Spread in close mode (bps)
   readonly orderSizeUsd: number // Order size in USD
   readonly closeThresholdUsd: number // Trigger close mode when position >= this
   readonly warmupSeconds: number // Seconds to warm up before quoting
+
+  // Operational parameters
   readonly updateThrottleMs: number // Min interval between quote updates
   readonly orderSyncIntervalMs: number // Interval for syncing orders from API
   readonly statusIntervalMs: number // Interval for status display
@@ -20,87 +24,81 @@ export interface MarketMakerConfig {
   readonly staleCheckIntervalMs: number // How often to check for staleness
 }
 
-// Default configuration values (symbol must be provided)
-export const DEFAULT_CONFIG: Omit<MarketMakerConfig, 'symbol'> = {
-  spreadBps: 5,
-  takeProfitBps: 5,
-  orderSizeUsd: 10,
-  closeThresholdUsd: 10,
-  warmupSeconds: 10,
-  updateThrottleMs: 100,
-  orderSyncIntervalMs: 3000,
-  statusIntervalMs: 1000,
-  fairPriceWindowMs: 5 * 60 * 1000, // 5 minutes
-  positionSyncIntervalMs: 5000,
-  staleThresholdMs: 60_000,
-  staleCheckIntervalMs: 10_000,
-}
-
 // snake_case TOML key → camelCase config field
 const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol'>> = {
+  // Strategy
   spread_bps: 'spreadBps',
   take_profit_bps: 'takeProfitBps',
   order_size_usd: 'orderSizeUsd',
   close_threshold_usd: 'closeThresholdUsd',
   warmup_seconds: 'warmupSeconds',
+  // Operational
   update_throttle_ms: 'updateThrottleMs',
   order_sync_interval_ms: 'orderSyncIntervalMs',
   status_interval_ms: 'statusIntervalMs',
   fair_price_window_ms: 'fairPriceWindowMs',
   position_sync_interval_ms: 'positionSyncIntervalMs',
+  stale_threshold_ms: 'staleThresholdMs',
+  stale_check_interval_ms: 'staleCheckIntervalMs',
 }
 
+// All TOML keys that must be present (globally or per-symbol)
+const REQUIRED_KEYS = Object.keys(KEY_MAP);
+
 // Extract numeric config values from a TOML section, mapping snake_case → camelCase
-function extractOverrides(
+function extractValues(
   section: Record<string, unknown>,
 ): Partial<Omit<MarketMakerConfig, 'symbol'>> {
-  const overrides: Record<string, number> = {};
+  const values: Record<string, number> = {};
   for (const [tomlKey, configKey] of Object.entries(KEY_MAP)) {
     const val = section[tomlKey];
     if (val !== undefined) {
       if (typeof val !== "number") {
         throw new Error(`Config key "${tomlKey}" must be a number, got ${typeof val}`);
       }
-      overrides[configKey] = val;
+      values[configKey] = val;
     }
   }
-  return overrides;
+  return values;
 }
 
 // Load config from TOML file with per-symbol overrides
-// Merge order: code defaults → TOML globals → TOML [SYMBOL] section
+// Merge order: TOML globals → TOML [SYMBOL] section
+// All keys must be present after merge — missing keys are an error.
 export function loadConfig(symbol: string, configPath?: string): MarketMakerConfig {
   const filePath = configPath ?? process.env.CONFIG_PATH ?? "config.toml";
-
-  if (!existsSync(filePath)) {
-    log.info(`No config file at ${filePath}, using defaults`);
-    return { symbol, ...DEFAULT_CONFIG };
-  }
 
   const raw = readFileSync(filePath, "utf-8");
   const toml = parseTOML(raw);
 
-  // Global overrides (top-level numeric keys)
-  const globalOverrides = extractOverrides(toml as Record<string, unknown>);
+  // Global values (top-level numeric keys)
+  const globalValues = extractValues(toml as Record<string, unknown>);
 
   // Per-symbol overrides ([SYMBOL] section)
   const symbolSection = toml[symbol];
-  const symbolOverrides = symbolSection && typeof symbolSection === "object" && !Array.isArray(symbolSection)
-    ? extractOverrides(symbolSection as Record<string, unknown>)
+  const symbolValues = symbolSection && typeof symbolSection === "object" && !Array.isArray(symbolSection)
+    ? extractValues(symbolSection as Record<string, unknown>)
     : {};
 
-  const config: MarketMakerConfig = {
-    symbol,
-    ...DEFAULT_CONFIG,
-    ...globalOverrides,
-    ...symbolOverrides,
-  };
+  const merged = { ...globalValues, ...symbolValues };
 
-  const overrideKeys = [...Object.keys(globalOverrides), ...Object.keys(symbolOverrides)];
-  if (overrideKeys.length > 0) {
-    log.info(`Config loaded from ${filePath} (overrides: ${overrideKeys.join(", ")})`);
+  // Validate all required keys are present
+  const missing = REQUIRED_KEYS.filter(
+    (tomlKey) => merged[KEY_MAP[tomlKey]] === undefined,
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required config keys in ${filePath}: ${missing.join(", ")}`,
+    );
+  }
+
+  const config = { symbol, ...merged } as MarketMakerConfig;
+
+  const symbolKeys = Object.keys(symbolValues);
+  if (symbolKeys.length > 0) {
+    log.info(`Config loaded from ${filePath} (symbol overrides: ${symbolKeys.join(", ")})`);
   } else {
-    log.info(`Config loaded from ${filePath} (no overrides, using defaults)`);
+    log.info(`Config loaded from ${filePath}`);
   }
 
   return config;
