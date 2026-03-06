@@ -21,6 +21,7 @@ import {
 } from "../../sdk/orders.js";
 import type { MidPrice } from "../../types.js";
 import { log } from "../../utils/logger.js";
+import { type BalanceConfig, BalanceTracker } from "./balance.js";
 import type { MarketMakerConfig } from "./config.js";
 import { type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
@@ -93,6 +94,7 @@ export class MarketMaker {
 	private binanceFeed: BinancePriceFeed | null = null;
 	private fairPriceCalc: FairPriceProvider | null = null;
 	private positionTracker: PositionTracker | null = null;
+	private balanceTracker: BalanceTracker | null = null;
 	private quoter: Quoter | null = null;
 	private isRunning = false;
 	private lastLoggedSampleCount = -1;
@@ -180,6 +182,11 @@ export class MarketMaker {
 			this.config.orderSizeUsd,
 		);
 
+		const balanceConfig: BalanceConfig = {
+			syncIntervalMs: this.config.balanceSyncIntervalMs,
+		};
+		this.balanceTracker = new BalanceTracker(balanceConfig);
+
 		// Initialize streams
 		this.accountStream = new AccountStream(
 			nord, accountId,
@@ -207,6 +214,8 @@ export class MarketMaker {
 
 			const fillPnL =
 				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
+
+			this.balanceTracker?.recordFill(fill.side, fill.size, fill.price);
 
 			log.fill(
 				fill.side === "bid" ? "buy" : "sell",
@@ -303,7 +312,11 @@ export class MarketMaker {
 	}
 
 	private async syncInitialOrders(): Promise<void> {
-		const { user, accountId } = this.requireClient();
+		const { nord, user, accountId } = this.requireClient();
+
+		// Initialize balance tracker before any orders (logs starting balance + fee rates)
+		log.initFileLoggers(this.marketSymbol);
+		await this.balanceTracker?.initialize(nord, user, accountId);
 
 		await user.fetchInfo();
 		const existingOrders = (user.orders[accountId] ?? []) as ApiOrder[];
@@ -315,6 +328,9 @@ export class MarketMaker {
 
 		// Start position sync
 		this.positionTracker?.startSync(user, accountId, this.marketId);
+
+		// Start balance sync
+		this.balanceTracker?.startSync(user, accountId);
 	}
 
 	private startIntervals(): void {
@@ -350,6 +366,7 @@ export class MarketMaker {
 		this.isRunning = false;
 		this.throttledUpdate?.cancel();
 		this.positionTracker?.stopSync();
+		this.balanceTracker?.stopSync();
 
 		if (this.statusInterval) {
 			clearInterval(this.statusInterval);
@@ -413,6 +430,10 @@ export class MarketMaker {
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
 			log.sessionSummary(summary);
+		}
+
+		if (this.balanceTracker) {
+			log.balanceSummary(this.balanceTracker.getSessionSummary());
 		}
 
 		log.info("SHUTDOWN: complete");

@@ -22,6 +22,7 @@ export interface MarketMakerConfig {
   readonly positionSyncIntervalMs: number // Interval for position sync
   readonly staleThresholdMs: number // Consider stream stale after this many ms
   readonly staleCheckIntervalMs: number // How often to check for staleness
+  readonly balanceSyncIntervalMs: number // Interval for balance tracking sync
 }
 
 // snake_case TOML key → camelCase config field
@@ -40,6 +41,7 @@ const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol'>> = {
   position_sync_interval_ms: 'positionSyncIntervalMs',
   stale_threshold_ms: 'staleThresholdMs',
   stale_check_interval_ms: 'staleCheckIntervalMs',
+  balance_sync_interval_ms: 'balanceSyncIntervalMs',
 }
 
 // All TOML keys that must be present (globally or per-symbol)

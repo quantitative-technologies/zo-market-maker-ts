@@ -20,6 +20,7 @@ fair_price_window_ms = 300000  # Fair price calculation window (5 minutes)
 position_sync_interval_ms = 5000   # Interval for position sync
 stale_threshold_ms = 60000     # Consider stream stale after this many ms
 stale_check_interval_ms = 10000    # How often to check for staleness
+balance_sync_interval_ms = 30000   # Interval for balance tracking sync
 
 # --- Per-symbol overrides ---
 

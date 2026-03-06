@@ -226,6 +226,38 @@ export const log = {
 		}
 	},
 
+	balanceSummary(summary: {
+		startingBalance: number;
+		currentBalance: number;
+		totalFunding: number;
+		totalTradingPnl: number;
+		totalFees: number;
+		totalUnexplained: number;
+		netChange: number;
+		syncCount: number;
+	}): void {
+		const fmt = (v: number) => {
+			const sign = v >= 0 ? "+" : "";
+			return `${sign}$${v.toFixed(4)}`;
+		};
+		const lines = [
+			"═══ BALANCE SUMMARY ═══",
+			`  Starting:    $${summary.startingBalance.toFixed(4)}`,
+			`  Current:     $${summary.currentBalance.toFixed(4)}`,
+			`  Net Change:  ${fmt(summary.netChange)}`,
+			`  Funding:     ${fmt(summary.totalFunding)}`,
+			`  Trading PnL: ${fmt(summary.totalTradingPnl)}`,
+			`  Fees:        ${fmt(summary.totalFees)}`,
+			`  Unexplained: ${fmt(summary.totalUnexplained)}`,
+			`  Syncs:       ${summary.syncCount}`,
+			"═══════════════════════",
+		];
+		for (const line of lines) {
+			this.info(line);
+			this.fileLog("balance", line);
+		}
+	},
+
 	sessionSummary(summary: {
 		uptimeMs: number;
 		fillCount: number;
