@@ -527,7 +527,7 @@ export class MarketMaker {
 			})
 			.catch((err) => {
 				log.error("Failed to cancel orders:", err);
-				this.activeOrders = [];
+				// Preserve activeOrders — next syncOrders will reconcile with exchange state
 			});
 	}
 
