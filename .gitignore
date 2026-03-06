@@ -4,6 +4,8 @@ dist/
 *.log
 .DS_Store
 .claude/
+.opencode/
+.vscode/
 
 # Logs
 logs
