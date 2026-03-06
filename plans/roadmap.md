@@ -60,6 +60,15 @@ and reconnection, account/fill monitoring, Docker deployment, monitor TUI, struc
 
 ---
 
+### 1.5 WebSocket-Driven Order Tracking
+- Replace `MarketMaker.activeOrders` array with `AccountStream.getOrdersForMarket()`
+- `AccountStream` already tracks places/cancels/fills from the account WebSocket — no need for duplicate state
+- Eliminates the class of orphaned-order bugs (no more `activeOrders = []` on error paths)
+- Remove periodic `syncOrders` polling (or demote to fallback/health-check)
+- Atomic result still used for immediate error handling, but order state comes from WebSocket
+
+---
+
 ## Phase 2: Configuration & Deployment
 
 ### 2.1 Runtime Configuration
