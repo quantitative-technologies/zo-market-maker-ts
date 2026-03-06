@@ -2,6 +2,8 @@
 // Terminal mode: tslog "pretty" for ANSI-colored output
 // TUI mode (setOutput called): plain text formatting (no ANSI codes)
 
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Logger } from "tslog";
 
 type LogOutput = (message: string) => void;
@@ -21,6 +23,18 @@ const TSLOG_LEVEL: Record<LogLevel, number> = {
 	warn: 4,
 	error: 5,
 };
+
+type FileLogWriter = (line: string) => void;
+
+const fileLoggers = new Map<string, FileLogWriter>();
+
+function createFileLogger(filepath: string): FileLogWriter {
+	const dir = dirname(filepath);
+	mkdirSync(dir, { recursive: true });
+	return (line: string) => {
+		appendFileSync(filepath, `${line}\n`);
+	};
+}
 
 let customOutput: LogOutput | null = null;
 let minLevel: LogLevel = (process.env.LOG_LEVEL as LogLevel) || "info";
@@ -70,6 +84,19 @@ function formatMessage(message: string, ...args: unknown[]): string {
 }
 
 export const log = {
+	initFileLoggers(symbol: string, logDir = "logs"): void {
+		const prefix = join(logDir, symbol.toLowerCase());
+		fileLoggers.set("position", createFileLogger(`${prefix}-position.log`));
+		fileLoggers.set("balance", createFileLogger(`${prefix}-balance.log`));
+	},
+
+	fileLog(name: string, message: string): void {
+		const writer = fileLoggers.get(name);
+		if (writer) {
+			writer(`${timestamp()}\t${message}`);
+		}
+	},
+
 	setOutput(fn: LogOutput): void {
 		customOutput = fn;
 	},
