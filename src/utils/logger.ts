@@ -176,9 +176,9 @@ export const log = {
 			const sign = unrealizedPnL >= 0 ? "+" : "";
 			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(4)}`;
 		}
-		this.info(
-			`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`,
-		);
+		const msg = `POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`;
+		this.info(msg);
+		this.fileLog("position", msg);
 	},
 
 	fill(
@@ -197,9 +197,9 @@ export const log = {
 			const sign = cumulativeRealizedPnL >= 0 ? "+" : "";
 			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(4)}`;
 		}
-		this.info(
-			`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`,
-		);
+		const msg = `FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`;
+		this.info(msg);
+		this.fileLog("position", msg);
 	},
 
 	banner(): void {
@@ -279,6 +279,10 @@ export const log = {
 		this.info(`  Net PnL:    ${fmt(summary.netPnL)}`);
 		this.info(`  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(2)} bps`);
 		this.info("═══════════════════════");
+		this.fileLog(
+			"position",
+			`SESSION: uptime=${uptimeMin}min fills=${summary.fillCount} vol=$${summary.totalVolumeUsd.toFixed(2)} rPnL=${fmt(summary.realizedPnL)} uPnL=${fmt(summary.unrealizedPnL)} net=${fmt(summary.netPnL)} spread=${summary.avgSpreadCapturedBps.toFixed(2)}bps`,
+		);
 	},
 
 	analyticsSummary(summary: {

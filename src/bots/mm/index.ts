@@ -161,6 +161,8 @@ export class MarketMaker {
 		this.priceDecimals = market.priceDecimals;
 		this.sizeDecimals = market.sizeDecimals;
 
+		log.initFileLoggers(market.symbol);
+
 		const binanceSymbol = deriveBinanceSymbol(market.symbol);
 		this.logConfig(binanceSymbol);
 
