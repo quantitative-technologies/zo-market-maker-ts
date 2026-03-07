@@ -84,12 +84,14 @@ export class BalanceTracker {
 				makerFeePpm: config.maker_fee_ppm,
 				takerFeePpm: config.taker_fee_ppm,
 			};
+			const makerBps = config.maker_fee_ppm / 100;
+			const takerBps = config.taker_fee_ppm / 100;
 			log.fileLog(
 				"balance",
-				`FEE_RATE: tier=${tierId} maker=${config.maker_fee_ppm}ppm taker=${config.taker_fee_ppm}ppm`,
+				`FEE_RATE: tier=${tierId} maker=${makerBps}bps taker=${takerBps}bps`,
 			);
 			log.info(
-				`BALANCE: fee tier ${tierId} — maker ${config.maker_fee_ppm}ppm, taker ${config.taker_fee_ppm}ppm`,
+				`BALANCE: fee tier ${tierId} — maker ${makerBps}bps, taker ${takerBps}bps`,
 			);
 		} else {
 			log.warn(`BALANCE: fee tier ${tierId} not found in brackets`);
