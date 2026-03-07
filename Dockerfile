@@ -18,6 +18,8 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
+RUN mkdir -p logs && chown node:node logs
+
 USER node
 
 ENTRYPOINT ["node", "dist/cli/bot.js"]

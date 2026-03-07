@@ -42,3 +42,9 @@ logs-%:
 
 monitor-%:
 	npm run monitor -- $*
+
+position-log-%:
+	tail -f logs/$$(echo $* | tr A-Z a-z)*-position.log
+
+balance-log-%:
+	tail -f logs/$$(echo $* | tr A-Z a-z)*-balance.log
