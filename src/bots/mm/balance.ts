@@ -1,4 +1,13 @@
 // Balance tracker — logs starting balance, fee rates, and attributed balance changes
+//
+// Empirically verified balance model (01 Exchange):
+//   While position is open: Δbalance = realizedPnL - fees
+//     (funding accrues on position via fundingPaymentPnl but does NOT touch balance)
+//   On position close: Δbalance = closingPnL - closingFee + accumulatedFunding
+//     (everything settles into balance at once)
+//
+// Therefore: netTrading = Δbalance (includes realized PnL, fees, and funding on close)
+// Funding is tracked separately for reporting only.
 
 import type { Nord, NordUser } from "@n1xyz/nord-ts";
 import { log } from "../../utils/logger.js";
@@ -25,7 +34,6 @@ export interface BalanceSummary {
 	readonly totalFunding: number;
 	readonly totalNetTrading: number;
 	readonly totalFees: number;
-	readonly totalUnexplained: number;
 	readonly netChange: number;
 	readonly syncCount: number;
 }
@@ -44,9 +52,8 @@ export class BalanceTracker {
 
 	// Cumulative totals across all syncs
 	private totalFunding = 0;
-	private totalNetTrading = 0; // realizedPnL - fees = Δbalance - Δfunding
-	private totalFees = 0;
-	private totalUnexplained = 0;
+	private totalNetTrading = 0; // = Δbalance (includes realizedPnL - fees, and funding on close)
+	private totalFees = 0; // estimated from WebSocket fills
 
 	constructor(private readonly config: BalanceConfig) {}
 
@@ -67,10 +74,10 @@ export class BalanceTracker {
 		this.currentBalance = this.startingBalance;
 		log.fileLog(
 			"balance",
-			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(4)}`,
+			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(6)}`,
 		);
 		log.info(
-			`BALANCE: starting balance $${this.startingBalance.toFixed(4)}`,
+			`BALANCE: starting balance $${this.startingBalance.toFixed(6)}`,
 		);
 
 		// Fetch fee rates
@@ -112,6 +119,10 @@ export class BalanceTracker {
 		this.isRunning = false;
 	}
 
+	async finalSync(user: NordUser, accountId: number): Promise<void> {
+		await this.syncFromServer(user, accountId);
+	}
+
 	recordFill(side: "bid" | "ask", size: number, price: number): void {
 		if (!this.feeRate) return;
 		const fee = (size * price * this.feeRate.makerFeePpm) / 1_000_000;
@@ -133,7 +144,6 @@ export class BalanceTracker {
 			totalFunding: this.totalFunding,
 			totalNetTrading: this.totalNetTrading,
 			totalFees: this.totalFees,
-			totalUnexplained: this.totalUnexplained,
 			netChange: this.currentBalance - this.startingBalance,
 			syncCount: this.syncCount,
 		};
@@ -165,8 +175,9 @@ export class BalanceTracker {
 				const balanceChange =
 					newSnapshot.balance - this.previousSnapshot.balance;
 
-				// Compute funding delta across all markets (including closed positions)
-				// Use lastKnownFunding to track markets that may have disappeared
+				// Compute funding delta across all markets (for reporting only)
+				// Funding does NOT affect balance while position is open;
+				// it settles into balance on position close
 				const allMarketIds = new Set<number>([
 					...this.lastKnownFunding.keys(),
 					...newSnapshot.fundingPnlByMarket.keys(),
@@ -176,14 +187,14 @@ export class BalanceTracker {
 				for (const marketId of allMarketIds) {
 					const prevFunding =
 						this.lastKnownFunding.get(marketId) ?? 0;
+					// If position closed, funding disappears from snapshot (resets to 0)
 					const currentFunding =
-						newSnapshot.fundingPnlByMarket.get(marketId) ?? prevFunding;
+						newSnapshot.fundingPnlByMarket.get(marketId) ?? 0;
 					fundingDelta += currentFunding - prevFunding;
 				}
 
-				// Core equation: Δbalance = (realizedPnL - fees) + Δfunding
-				// Therefore: netTrading = realizedPnL - fees = Δbalance - Δfunding
-				const netTradingDelta = balanceChange - fundingDelta;
+				// netTrading = Δbalance (the balance IS the source of truth)
+				const netTradingDelta = balanceChange;
 
 				// Capture accumulated fees from WebSocket fills since last sync
 				const feesDelta = this.pendingFeeAccumulator;
@@ -196,19 +207,25 @@ export class BalanceTracker {
 
 				const fmt = (v: number) => {
 					const sign = v >= 0 ? "+" : "";
-					return `${sign}$${v.toFixed(4)}`;
+					return `${sign}$${v.toFixed(6)}`;
 				};
 
-				if (Math.abs(balanceChange) > 0.0001) {
+				if (balanceChange !== 0) {
 					log.fileLog(
 						"balance",
-						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(4)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | netTrading=${fmt(netTradingDelta)} | estFees=${fmt(feesDelta)}`,
+						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(6)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | estFees=${fmt(feesDelta)}`,
 					);
 				}
 			}
 
 			// Update last-known funding from current snapshot
-			// For closed positions: keep the last-known value (it won't appear in next snapshot)
+			// When position closes, the market disappears — reset to 0
+			// so the next open starts fresh
+			for (const marketId of this.lastKnownFunding.keys()) {
+				if (!newSnapshot.fundingPnlByMarket.has(marketId)) {
+					this.lastKnownFunding.set(marketId, 0);
+				}
+			}
 			for (const [marketId, funding] of newSnapshot.fundingPnlByMarket) {
 				this.lastKnownFunding.set(marketId, funding);
 			}

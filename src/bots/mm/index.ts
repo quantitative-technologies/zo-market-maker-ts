@@ -418,6 +418,11 @@ export class MarketMaker {
 			log.error("SHUTDOWN: close position failed:", err);
 		}
 
+		// Final balance sync to capture the closing trade
+		if (this.balanceTracker && this.client) {
+			await this.balanceTracker.finalSync(this.client.user, this.client.accountId);
+		}
+
 		// Close feeds after cleanup (SDK may need connection for API calls)
 		this.accountStream?.close();
 		this.binanceFeed?.close();

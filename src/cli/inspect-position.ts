@@ -54,17 +54,17 @@ async function run(symbol: string, privateKey: string): Promise<void> {
 	// Header
 	console.log(
 		"time".padEnd(12) +
-		"balance".padStart(12) +
-		"Δbal".padStart(10) +
+		"balance".padStart(14) +
+		"Δbal".padStart(12) +
 		"  │ " +
 		"baseSize".padStart(12) +
-		"entry".padStart(10) +
+		"entry".padStart(12) +
 		"sizePricePnl".padStart(14) +
-		"Δpnl".padStart(10) +
+		"Δpnl".padStart(12) +
 		"fundingPnl".padStart(12) +
-		"Δfund".padStart(10),
+		"Δfund".padStart(12),
 	);
-	console.log("─".repeat(112));
+	console.log("─".repeat(124));
 
 	let prev: Snapshot | null = null;
 
@@ -92,27 +92,27 @@ async function run(symbol: string, privateKey: string): Promise<void> {
 
 		const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
 
-		const fmt = (v: number, w: number) => {
-			const s = v.toFixed(4);
+		const fmt = (v: number, w: number, decimals = 6) => {
+			const s = v.toFixed(decimals);
 			return s.padStart(w);
 		};
-		const fmtDelta = (v: number, w: number) => {
+		const fmtDelta = (v: number, w: number, decimals = 6) => {
 			if (v === 0) return "".padStart(w);
 			const sign = v > 0 ? "+" : "";
-			return (sign + v.toFixed(4)).padStart(w);
+			return (sign + v.toFixed(decimals)).padStart(w);
 		};
 
 		console.log(
 			time.padEnd(12) +
-			fmt(snap.balance, 12) +
-			fmtDelta(dBal, 10) +
+			fmt(snap.balance, 14, 4) +
+			fmtDelta(dBal, 12, 4) +
 			"  │ " +
 			fmt(snap.baseSize, 12) +
-			fmt(snap.entryPrice, 10) +
+			fmt(snap.entryPrice, 12, 2) +
 			fmt(snap.sizePricePnl, 14) +
-			fmtDelta(dPnl, 10) +
+			fmtDelta(dPnl, 12) +
 			fmt(snap.fundingPnl, 12) +
-			fmtDelta(dFund, 10),
+			fmtDelta(dFund, 12),
 		);
 
 		prev = snap;

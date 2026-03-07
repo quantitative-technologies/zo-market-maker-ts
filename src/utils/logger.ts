@@ -232,7 +232,6 @@ export const log = {
 		totalFunding: number;
 		totalNetTrading: number;
 		totalFees: number;
-		totalUnexplained: number;
 		netChange: number;
 		syncCount: number;
 	}): void {
@@ -247,8 +246,7 @@ export const log = {
 			`  Net Change:  ${fmt(summary.netChange)}`,
 			`  Funding:     ${fmt(summary.totalFunding)}`,
 			`  Net Trading: ${fmt(summary.totalNetTrading)}`,
-			`  Fees:        ${fmt(summary.totalFees)}`,
-			`  Unexplained: ${fmt(summary.totalUnexplained)}`,
+			`  Est Fees:    ${fmt(summary.totalFees)}`,
 			`  Syncs:       ${summary.syncCount}`,
 			"═══════════════════════",
 		];
