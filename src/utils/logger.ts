@@ -230,7 +230,7 @@ export const log = {
 		startingBalance: number;
 		currentBalance: number;
 		totalFunding: number;
-		totalTradingPnl: number;
+		totalNetTrading: number;
 		totalFees: number;
 		totalUnexplained: number;
 		netChange: number;
@@ -246,7 +246,7 @@ export const log = {
 			`  Current:     $${summary.currentBalance.toFixed(4)}`,
 			`  Net Change:  ${fmt(summary.netChange)}`,
 			`  Funding:     ${fmt(summary.totalFunding)}`,
-			`  Trading PnL: ${fmt(summary.totalTradingPnl)}`,
+			`  Net Trading: ${fmt(summary.totalNetTrading)}`,
 			`  Fees:        ${fmt(summary.totalFees)}`,
 			`  Unexplained: ${fmt(summary.totalUnexplained)}`,
 			`  Syncs:       ${summary.syncCount}`,

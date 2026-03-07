@@ -7,7 +7,7 @@ export interface BalanceConfig {
 	readonly syncIntervalMs: number;
 }
 
-interface FeeRateInfo {
+export interface FeeRateInfo {
 	readonly feeTierId: number;
 	readonly makerFeePpm: number;
 	readonly takerFeePpm: number;
@@ -15,16 +15,15 @@ interface FeeRateInfo {
 
 interface BalanceSnapshot {
 	readonly balance: number;
-	// marketId → cumulative PnL from REST position data
+	// marketId → cumulative funding PnL from REST position data
 	readonly fundingPnlByMarket: Map<number, number>;
-	readonly tradingPnlByMarket: Map<number, number>;
 }
 
 export interface BalanceSummary {
 	readonly startingBalance: number;
 	readonly currentBalance: number;
 	readonly totalFunding: number;
-	readonly totalTradingPnl: number;
+	readonly totalNetTrading: number;
 	readonly totalFees: number;
 	readonly totalUnexplained: number;
 	readonly netChange: number;
@@ -40,9 +39,12 @@ export class BalanceTracker {
 	private pendingFeeAccumulator = 0;
 	private syncCount = 0;
 
+	// Last-known funding per market — survives position close
+	private lastKnownFunding = new Map<number, number>();
+
 	// Cumulative totals across all syncs
 	private totalFunding = 0;
-	private totalTradingPnl = 0;
+	private totalNetTrading = 0; // realizedPnL - fees = Δbalance - Δfunding
 	private totalFees = 0;
 	private totalUnexplained = 0;
 
@@ -120,8 +122,8 @@ export class BalanceTracker {
 		);
 	}
 
-	getMakerFeePpm(): number | null {
-		return this.feeRate?.makerFeePpm ?? null;
+	getFeeRate(): FeeRateInfo | null {
+		return this.feeRate;
 	}
 
 	getSessionSummary(): BalanceSummary {
@@ -129,7 +131,7 @@ export class BalanceTracker {
 			startingBalance: this.startingBalance,
 			currentBalance: this.currentBalance,
 			totalFunding: this.totalFunding,
-			totalTradingPnl: this.totalTradingPnl,
+			totalNetTrading: this.totalNetTrading,
 			totalFees: this.totalFees,
 			totalUnexplained: this.totalUnexplained,
 			netChange: this.currentBalance - this.startingBalance,
@@ -163,34 +165,34 @@ export class BalanceTracker {
 				const balanceChange =
 					newSnapshot.balance - this.previousSnapshot.balance;
 
-				// Compute funding delta across all markets
+				// Compute funding delta across all markets (including closed positions)
+				// Use lastKnownFunding to track markets that may have disappeared
+				const allMarketIds = new Set<number>([
+					...this.lastKnownFunding.keys(),
+					...newSnapshot.fundingPnlByMarket.keys(),
+				]);
+
 				let fundingDelta = 0;
-				for (const [marketId, currentFunding] of newSnapshot.fundingPnlByMarket) {
+				for (const marketId of allMarketIds) {
 					const prevFunding =
-						this.previousSnapshot.fundingPnlByMarket.get(marketId) ?? 0;
+						this.lastKnownFunding.get(marketId) ?? 0;
+					const currentFunding =
+						newSnapshot.fundingPnlByMarket.get(marketId) ?? prevFunding;
 					fundingDelta += currentFunding - prevFunding;
 				}
 
-				// Compute trading PnL delta across all markets
-				let tradingDelta = 0;
-				for (const [marketId, currentTrading] of newSnapshot.tradingPnlByMarket) {
-					const prevTrading =
-						this.previousSnapshot.tradingPnlByMarket.get(marketId) ?? 0;
-					tradingDelta += currentTrading - prevTrading;
-				}
+				// Core equation: Δbalance = (realizedPnL - fees) + Δfunding
+				// Therefore: netTrading = realizedPnL - fees = Δbalance - Δfunding
+				const netTradingDelta = balanceChange - fundingDelta;
 
-				// Capture accumulated fees from fills since last sync
+				// Capture accumulated fees from WebSocket fills since last sync
 				const feesDelta = this.pendingFeeAccumulator;
 				this.pendingFeeAccumulator = 0;
 
-				const unexplained =
-					balanceChange - fundingDelta - tradingDelta + feesDelta;
-
 				// Accumulate session totals
 				this.totalFunding += fundingDelta;
-				this.totalTradingPnl += tradingDelta;
+				this.totalNetTrading += netTradingDelta;
 				this.totalFees += feesDelta;
-				this.totalUnexplained += unexplained;
 
 				const fmt = (v: number) => {
 					const sign = v >= 0 ? "+" : "";
@@ -200,9 +202,15 @@ export class BalanceTracker {
 				if (Math.abs(balanceChange) > 0.0001) {
 					log.fileLog(
 						"balance",
-						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(4)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | trading=${fmt(tradingDelta)} | fees=${fmt(feesDelta)} | unexplained=${fmt(unexplained)}`,
+						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(4)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | netTrading=${fmt(netTradingDelta)} | estFees=${fmt(feesDelta)}`,
 					);
 				}
+			}
+
+			// Update last-known funding from current snapshot
+			// For closed positions: keep the last-known value (it won't appear in next snapshot)
+			for (const [marketId, funding] of newSnapshot.fundingPnlByMarket) {
+				this.lastKnownFunding.set(marketId, funding);
 			}
 
 			this.previousSnapshot = newSnapshot;
@@ -219,17 +227,15 @@ export class BalanceTracker {
 		const balance = balanceEntries.length > 0 ? balanceEntries[0].balance : 0;
 
 		const fundingPnlByMarket = new Map<number, number>();
-		const tradingPnlByMarket = new Map<number, number>();
 
 		const positions = user.positions[accountId] ?? [];
 		for (const pos of positions) {
 			if (pos.perp) {
 				fundingPnlByMarket.set(pos.marketId, pos.perp.fundingPaymentPnl);
-				tradingPnlByMarket.set(pos.marketId, pos.perp.sizePricePnl);
 			}
 		}
 
-		return { balance, fundingPnlByMarket, tradingPnlByMarket };
+		return { balance, fundingPnlByMarket };
 	}
 
 	private sleep(ms: number): Promise<void> {

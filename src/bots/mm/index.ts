@@ -230,15 +230,6 @@ export class MarketMaker {
 			}
 		});
 
-		// Position drift handler — cancel orders if drift puts us in close mode
-		this.positionTracker?.setOnDrift((_sizeDelta, _newBaseSize) => {
-			const markPrice = this.binanceFeed?.getMidPrice()?.mid ?? 0;
-			if (markPrice > 0 && this.positionTracker?.isCloseMode(markPrice)) {
-				log.warn("Drift triggered close mode — cancelling orders");
-				this.cancelOrdersAsync();
-			}
-		});
-
 		// Price feeds
 		if (this.binanceFeed) {
 			this.binanceFeed.onPrice = (price) => this.handleBinancePrice(price);
@@ -273,9 +264,6 @@ export class MarketMaker {
 			this.logWarmupProgress(binancePrice);
 			return;
 		}
-
-		// Feed mark price to position tracker for missed-fill PnL
-		this.positionTracker?.setMarkPrice(fairPrice);
 
 		// Log ready on first valid fair price
 		if (this.lastLoggedSampleCount < this.config.warmupSeconds) {
@@ -326,8 +314,16 @@ export class MarketMaker {
 		this.activeOrders = mapApiOrdersToCached(marketOrders);
 		log.info(`Synced ${this.activeOrders.length} existing orders`);
 
-		// Start position sync
-		this.positionTracker?.startSync(user, accountId, this.marketId);
+		// Start position sync (pass nord + fee rates for fill recovery)
+		const feeRate = this.balanceTracker?.getFeeRate();
+		this.positionTracker?.startSync(
+			user,
+			accountId,
+			this.marketId,
+			nord,
+			feeRate?.makerFeePpm ?? 0,
+			feeRate?.takerFeePpm ?? 0,
+		);
 
 		// Start balance sync
 		this.balanceTracker?.startSync(user, accountId);
