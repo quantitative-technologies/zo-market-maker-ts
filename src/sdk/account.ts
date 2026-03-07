@@ -12,15 +12,10 @@ export interface TrackedOrder {
 	marketId: number;
 }
 
-// Fill event data
-export interface FillEvent {
-	orderId: string;
-	side: "bid" | "ask";
-	size: number;
-	price: number;
-	remaining: number;
-	marketId: number;
-}
+// Re-export from shared types
+export type { FillEvent } from "../types.js";
+
+import type { FillEvent } from "../types.js";
 
 type FillCallback = (fill: FillEvent) => void;
 

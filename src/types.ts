@@ -18,3 +18,36 @@ export interface Quote {
 	price: Decimal;
 	size: Decimal;
 }
+
+// Best Bid/Offer for clamping order prices
+export interface BBO {
+	bestBid: number;
+	bestAsk: number;
+}
+
+// Fill event data
+export interface FillEvent {
+	orderId: string;
+	side: "bid" | "ask";
+	size: number;
+	price: number;
+	remaining: number;
+	marketId: number;
+}
+
+export type FillCallback = (fill: FillEvent) => void;
+
+// Cached order info
+export interface CachedOrder {
+	orderId: string;
+	side: "bid" | "ask";
+	price: Decimal;
+	size: Decimal;
+}
+
+// Market metadata returned by exchange adapter on connect
+export interface MarketInfo {
+	symbol: string;
+	priceDecimals: number;
+	sizeDecimals: number;
+}

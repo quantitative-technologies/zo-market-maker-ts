@@ -3,6 +3,7 @@
 import "dotenv/config";
 import { loadConfig } from "../bots/mm/config.js";
 import { MarketMaker } from "../bots/mm/index.js";
+import { createAdapter } from "../exchanges/index.js";
 import { log } from "../utils/logger.js";
 
 function parseArgs(): { symbol: string; configPath?: string } {
@@ -40,7 +41,15 @@ function main(): void {
 
 	const config = loadConfig(symbol, configPath);
 
-	const bot = new MarketMaker(config, privateKey);
+	const adapter = createAdapter({
+		exchange: config.exchange,
+		privateKey,
+		symbol: config.symbol,
+		staleThresholdMs: config.staleThresholdMs,
+		staleCheckIntervalMs: config.staleCheckIntervalMs,
+	});
+
+	const bot = new MarketMaker(config, adapter);
 
 	bot.run().catch((err) => {
 		log.error("Fatal error:", err);

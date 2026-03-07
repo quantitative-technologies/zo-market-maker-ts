@@ -5,6 +5,7 @@ import { parse as parseTOML } from "smol-toml";
 import { log } from "../../utils/logger.js";
 
 export interface MarketMakerConfig {
+  readonly exchange: string // e.g., "zo" or "hyperliquid"
   readonly symbol: string // e.g., "BTC" or "ETH"
 
   // Strategy parameters
@@ -25,7 +26,7 @@ export interface MarketMakerConfig {
 }
 
 // snake_case TOML key → camelCase config field
-const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol'>> = {
+const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol' | 'exchange'>> = {
   // Strategy
   spread_bps: 'spreadBps',
   take_profit_bps: 'takeProfitBps',
@@ -48,7 +49,7 @@ const REQUIRED_KEYS = Object.keys(KEY_MAP);
 // Extract numeric config values from a TOML section, mapping snake_case → camelCase
 function extractValues(
   section: Record<string, unknown>,
-): Partial<Omit<MarketMakerConfig, 'symbol'>> {
+): Partial<Omit<MarketMakerConfig, 'symbol' | 'exchange'>> {
   const values: Record<string, number> = {};
   for (const [tomlKey, configKey] of Object.entries(KEY_MAP)) {
     const val = section[tomlKey];
@@ -71,6 +72,12 @@ export function loadConfig(symbol: string, configPath?: string): MarketMakerConf
   const raw = readFileSync(filePath, "utf-8");
   const toml = parseTOML(raw);
 
+  // Read exchange (required, string)
+  const exchange = toml.exchange;
+  if (typeof exchange !== "string" || exchange.length === 0) {
+    throw new Error(`Missing required config key "exchange" in ${filePath}. Example: exchange = "zo"`);
+  }
+
   // Global values (top-level numeric keys)
   const globalValues = extractValues(toml as Record<string, unknown>);
 
@@ -92,7 +99,7 @@ export function loadConfig(symbol: string, configPath?: string): MarketMakerConf
     );
   }
 
-  const config = { symbol, ...merged } as MarketMakerConfig;
+  const config = { exchange, symbol, ...merged } as MarketMakerConfig;
 
   const symbolKeys = Object.keys(symbolValues);
   if (symbolKeys.length > 0) {

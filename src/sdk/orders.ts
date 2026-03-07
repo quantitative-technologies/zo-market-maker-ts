@@ -8,17 +8,14 @@ import {
 } from "@n1xyz/nord-ts";
 import Decimal from "decimal.js";
 import type { Quote } from "../types.js";
+import { diffOrders } from "../orders.js";
 import { log } from "../utils/logger.js";
 
 const MAX_ATOMIC_ACTIONS = 4;
 
-// Cached order info
-export interface CachedOrder {
-	orderId: string;
-	side: "bid" | "ask";
-	price: Decimal;
-	size: Decimal;
-}
+// Re-export from shared types
+export type { CachedOrder } from "../types.js";
+import type { CachedOrder } from "../types.js";
 
 // Result type for atomic operations
 interface AtomicResult {
@@ -153,15 +150,6 @@ function buildCancelAction(orderId: string): UserAtomicSubaction {
 	};
 }
 
-// Check if order matches quote (same side, price, size)
-function orderMatchesQuote(order: CachedOrder, quote: Quote): boolean {
-	return (
-		order.side === quote.side &&
-		order.price.eq(quote.price) &&
-		order.size.eq(quote.size)
-	);
-}
-
 // Update quotes: only cancel/place if changed
 export async function updateQuotes(
 	user: NordUser,
@@ -169,42 +157,36 @@ export async function updateQuotes(
 	currentOrders: CachedOrder[],
 	newQuotes: Quote[],
 ): Promise<CachedOrder[]> {
-	const keptOrders: CachedOrder[] = [];
-	const ordersToCancel: CachedOrder[] = [];
-	const quotesToPlace: Quote[] = [];
+	const { kept, toCancel, toPlace } = diffOrders(currentOrders, newQuotes);
 
-	// For each new quote, check if matching order exists
-	for (const quote of newQuotes) {
-		const matchingOrder = currentOrders.find((o) =>
-			orderMatchesQuote(o, quote),
-		);
-		if (matchingOrder) {
-			keptOrders.push(matchingOrder);
-		} else {
-			quotesToPlace.push(quote);
-		}
-	}
-
-	// Cancel orders that don't match any new quote
-	for (const order of currentOrders) {
-		if (!keptOrders.includes(order)) {
-			ordersToCancel.push(order);
-		}
-	}
-
-	// Skip if nothing to do
-	if (ordersToCancel.length === 0 && quotesToPlace.length === 0) {
+	if (toCancel.length === 0 && toPlace.length === 0) {
 		return currentOrders;
 	}
 
-	// Build actions: cancels first, then places
 	const actions: UserAtomicSubaction[] = [
-		...ordersToCancel.map((o) => buildCancelAction(o.orderId)),
-		...quotesToPlace.map((q) => buildPlaceAction(marketId, q)),
+		...toCancel.map((o) => buildCancelAction(o.orderId)),
+		...toPlace.map((q) => buildPlaceAction(marketId, q)),
 	];
 
 	const placedOrders = await executeAtomic(user, actions);
-	return [...keptOrders, ...placedOrders];
+	return [...kept, ...placedOrders];
+}
+
+// Execute pre-computed cancels and places atomically (used by ZoAdapter)
+export async function executeQuoteUpdate(
+	user: NordUser,
+	marketId: number,
+	cancels: CachedOrder[],
+	places: Quote[],
+): Promise<CachedOrder[]> {
+	if (cancels.length === 0 && places.length === 0) return [];
+
+	const actions: UserAtomicSubaction[] = [
+		...cancels.map((o) => buildCancelAction(o.orderId)),
+		...places.map((q) => buildPlaceAction(marketId, q)),
+	];
+
+	return executeAtomic(user, actions);
 }
 
 // Cancel orders

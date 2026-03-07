@@ -1,7 +1,5 @@
 // MarketMaker - main bot logic
 
-import type { NordUser } from "@n1xyz/nord-ts";
-import Decimal from "decimal.js";
 import type { DebouncedFunc } from "lodash-es";
 import { throttle } from "lodash-es";
 import { BinancePriceFeed } from "../../pricing/binance.js";
@@ -10,41 +8,15 @@ import {
 	type FairPriceConfig,
 	type FairPriceProvider,
 } from "../../pricing/fair-price.js";
-import { AccountStream, type FillEvent } from "../../sdk/account.js";
-import { createZoClient, type ZoClient } from "../../sdk/client.js";
-import { ZoOrderbookStream } from "../../sdk/orderbook.js";
-import {
-	type CachedOrder,
-	cancelOrders,
-	closePosition,
-	updateQuotes,
-} from "../../sdk/orders.js";
-import type { MidPrice } from "../../types.js";
+import type { ExchangeAdapter } from "../../exchanges/adapter.js";
+import { diffOrders } from "../../orders.js";
+import type { CachedOrder, FillEvent, MidPrice } from "../../types.js";
 import { log } from "../../utils/logger.js";
 import type { MarketMakerConfig } from "./config.js";
 import { type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
 
 export type { MarketMakerConfig } from "./config.js";
-
-// API order type from SDK
-interface ApiOrder {
-	orderId: bigint | number;
-	marketId: number;
-	side: "bid" | "ask";
-	price: number | string;
-	size: number | string;
-}
-
-// Convert API orders to cached orders
-function mapApiOrdersToCached(orders: ApiOrder[]): CachedOrder[] {
-	return orders.map((o) => ({
-		orderId: o.orderId.toString(),
-		side: o.side,
-		price: new Decimal(o.price),
-		size: new Decimal(o.size),
-	}));
-}
 
 // Classify atomic errors by inspecting SDK cause chain.
 // Positively identifies known-safe cases; everything else is a network error
@@ -83,13 +55,8 @@ function deriveBinanceSymbol(marketSymbol: string): string {
 }
 
 export class MarketMaker {
-	private client: ZoClient | null = null;
-	private marketId = 0;
 	private marketSymbol = "";
 	private priceDecimals = 2;
-	private sizeDecimals = 4;
-	private accountStream: AccountStream | null = null;
-	private orderbookStream: ZoOrderbookStream | null = null;
 	private binanceFeed: BinancePriceFeed | null = null;
 	private fairPriceCalc: FairPriceProvider | null = null;
 	private positionTracker: PositionTracker | null = null;
@@ -109,15 +76,8 @@ export class MarketMaker {
 
 	constructor(
 		private readonly config: MarketMakerConfig,
-		private readonly privateKey: string,
+		private readonly adapter: ExchangeAdapter,
 	) {}
-
-	private requireClient(): ZoClient {
-		if (!this.client) {
-			throw new Error("Client not initialized");
-		}
-		return this.client;
-	}
 
 	async run(): Promise<void> {
 		log.banner();
@@ -139,25 +99,11 @@ export class MarketMaker {
 			{ leading: true, trailing: true },
 		);
 
-		this.client = await createZoClient(this.privateKey);
-		const { nord, accountId } = this.client;
+		const marketInfo = await this.adapter.connect();
+		this.marketSymbol = marketInfo.symbol;
+		this.priceDecimals = marketInfo.priceDecimals;
 
-		// Find market by symbol (e.g., "BTC" matches "BTC-PERP")
-		const market = nord.markets.find((m) =>
-			m.symbol.toUpperCase().startsWith(this.config.symbol.toUpperCase()),
-		);
-		if (!market) {
-			const available = nord.markets.map((m) => m.symbol).join(", ");
-			throw new Error(
-				`Market "${this.config.symbol}" not found. Available: ${available}`,
-			);
-		}
-		this.marketId = market.marketId;
-		this.marketSymbol = market.symbol;
-		this.priceDecimals = market.priceDecimals;
-		this.sizeDecimals = market.sizeDecimals;
-
-		const binanceSymbol = deriveBinanceSymbol(market.symbol);
+		const binanceSymbol = deriveBinanceSymbol(marketInfo.symbol);
 		this.logConfig(binanceSymbol);
 
 		// Initialize strategy components
@@ -173,22 +119,14 @@ export class MarketMaker {
 		this.fairPriceCalc = new FairPriceCalculator(fairPriceConfig);
 		this.positionTracker = new PositionTracker(positionConfig);
 		this.quoter = new Quoter(
-			market.priceDecimals,
-			market.sizeDecimals,
+			marketInfo.priceDecimals,
+			marketInfo.sizeDecimals,
 			this.config.spreadBps,
 			this.config.takeProfitBps,
 			this.config.orderSizeUsd,
 		);
 
-		// Initialize streams
-		this.accountStream = new AccountStream(
-			nord, accountId,
-			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
-		);
-		this.orderbookStream = new ZoOrderbookStream(
-			nord, this.marketSymbol, undefined,
-			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
-		);
+		// Initialize Binance reference feed
 		this.binanceFeed = new BinancePriceFeed(
 			binanceSymbol,
 			this.config.staleThresholdMs, this.config.staleCheckIntervalMs,
@@ -198,13 +136,8 @@ export class MarketMaker {
 	}
 
 	private setupEventHandlers(): void {
-		const { user, accountId } = this.requireClient();
-
-		// Account stream - fill events
-		this.accountStream?.syncOrders(user, accountId);
-		this.accountStream?.setOnFill((fill: FillEvent) => {
-			if (fill.marketId !== this.marketId) return;
-
+		// Exchange adapter fill events
+		this.adapter.onFill = (fill: FillEvent) => {
 			const fillPnL =
 				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
 
@@ -219,7 +152,10 @@ export class MarketMaker {
 			if (this.positionTracker?.isCloseMode(fill.price)) {
 				this.cancelOrdersAsync();
 			}
-		});
+		};
+
+		// Exchange adapter orderbook price
+		this.adapter.onPrice = (price: MidPrice) => this.handleExchangePrice(price);
 
 		// Position drift handler — cancel orders if drift puts us in close mode
 		this.positionTracker?.setOnDrift((_sizeDelta, _newBaseSize) => {
@@ -230,17 +166,12 @@ export class MarketMaker {
 			}
 		});
 
-		// Price feeds
+		// Binance reference price feed
 		if (this.binanceFeed) {
 			this.binanceFeed.onPrice = (price) => this.handleBinancePrice(price);
 		}
-		if (this.orderbookStream) {
-			this.orderbookStream.onPrice = (price) => this.handleZoPrice(price);
-		}
 
-		// Start connections
-		this.accountStream?.connect();
-		this.orderbookStream?.connect();
+		// Start Binance feed (exchange adapter streams started in connect())
 		this.binanceFeed?.connect();
 	}
 
@@ -249,12 +180,12 @@ export class MarketMaker {
 			this.lastTickTimestamp = binancePrice.tickTimestamp;
 		}
 
-		const zoPrice = this.orderbookStream?.getMidPrice();
+		const exchangePrice = this.adapter.getMidPrice();
 		if (
-			zoPrice &&
-			Math.abs(binancePrice.timestamp - zoPrice.timestamp) < 1000
+			exchangePrice &&
+			Math.abs(binancePrice.timestamp - exchangePrice.timestamp) < 1000
 		) {
-			this.fairPriceCalc?.addSample(zoPrice.mid, binancePrice.mid);
+			this.fairPriceCalc?.addSample(exchangePrice.mid, binancePrice.mid);
 		}
 
 		if (!this.isRunning) return;
@@ -277,13 +208,13 @@ export class MarketMaker {
 		this.throttledUpdate?.(fairPrice);
 	}
 
-	private handleZoPrice(zoPrice: MidPrice): void {
+	private handleExchangePrice(exchangePrice: MidPrice): void {
 		const binancePrice = this.binanceFeed?.getMidPrice();
 		if (
 			binancePrice &&
-			Math.abs(zoPrice.timestamp - binancePrice.timestamp) < 1000
+			Math.abs(exchangePrice.timestamp - binancePrice.timestamp) < 1000
 		) {
-			this.fairPriceCalc?.addSample(zoPrice.mid, binancePrice.mid);
+			this.fairPriceCalc?.addSample(exchangePrice.mid, binancePrice.mid);
 		}
 	}
 
@@ -292,34 +223,25 @@ export class MarketMaker {
 		if (!state || state.samples === this.lastLoggedSampleCount) return;
 
 		this.lastLoggedSampleCount = state.samples;
-		const zoPrice = this.orderbookStream?.getMidPrice();
+		const exchangePrice = this.adapter.getMidPrice();
 		const offsetBps =
 			state.offset !== null && binancePrice.mid > 0
 				? ((state.offset / binancePrice.mid) * 10000).toFixed(1)
 				: "--";
 		log.info(
-			`Warming up: ${state.samples}/${this.config.warmupSeconds} samples | Binance $${binancePrice.mid.toFixed(2)} | 01 $${zoPrice?.mid.toFixed(2) ?? "--"} | Offset ${offsetBps}bps`,
+			`Warming up: ${state.samples}/${this.config.warmupSeconds} samples | Binance $${binancePrice.mid.toFixed(2)} | ${this.adapter.name} $${exchangePrice?.mid.toFixed(2) ?? "--"} | Offset ${offsetBps}bps`,
 		);
 	}
 
 	private async syncInitialOrders(): Promise<void> {
-		const { user, accountId } = this.requireClient();
-
-		await user.fetchInfo();
-		const existingOrders = (user.orders[accountId] ?? []) as ApiOrder[];
-		const marketOrders = existingOrders.filter(
-			(o) => o.marketId === this.marketId,
-		);
-		this.activeOrders = mapApiOrdersToCached(marketOrders);
+		this.activeOrders = await this.adapter.syncOrders();
 		log.info(`Synced ${this.activeOrders.length} existing orders`);
 
 		// Start position sync
-		this.positionTracker?.startSync(user, accountId, this.marketId);
+		this.positionTracker?.startSync(() => this.adapter.fetchPosition());
 	}
 
 	private startIntervals(): void {
-		const { user, accountId } = this.requireClient();
-
 		// Status display
 		this.statusInterval = setInterval(() => {
 			this.logStatus();
@@ -327,7 +249,7 @@ export class MarketMaker {
 
 		// Order sync
 		this.orderSyncInterval = setInterval(() => {
-			this.syncOrders(user, accountId);
+			this.syncOrders();
 		}, this.config.orderSyncIntervalMs);
 	}
 
@@ -368,47 +290,41 @@ export class MarketMaker {
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
 		log.info(`SHUTDOWN: mark price = ${markPrice}`);
 
-		// Cancel orders — ignore ORDER_NOT_FOUND (already filled/expired)
+		// Cancel orders
 		try {
-			if (this.activeOrders.length > 0 && this.client) {
+			if (this.activeOrders.length > 0) {
 				log.info(`SHUTDOWN: cancelling ${this.activeOrders.length} orders...`);
-				await cancelOrders(this.client.user, this.activeOrders);
+				await this.adapter.cancelOrders(this.activeOrders);
 				log.info("SHUTDOWN: orders cancelled");
 				this.activeOrders = [];
 			} else {
-				log.info(`SHUTDOWN: no active orders (tracked: ${this.activeOrders.length}, client: ${!!this.client})`);
+				log.info("SHUTDOWN: no active orders");
 			}
 		} catch (err) {
 			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
 		}
 
-		// Close open position — independent of order cancellation
+		// Close open position
 		try {
 			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
-			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
+			if (Math.abs(baseSize) > 1e-10 && markPrice > 0) {
 				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
 				const slippage = markPrice * 0.005;
 				const closePrice = baseSize > 0
 					? (markPrice - slippage).toFixed(this.priceDecimals)
 					: (markPrice + slippage).toFixed(this.priceDecimals);
-				await closePosition(
-					this.client.user,
-					this.marketId,
-					baseSize,
-					closePrice,
-				);
+				await this.adapter.closePosition(baseSize, closePrice);
 				log.info("SHUTDOWN: position closed");
 			} else {
-				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, client: ${!!this.client}, mark: ${markPrice})`);
+				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, mark: ${markPrice})`);
 			}
 		} catch (err) {
 			log.error("SHUTDOWN: close position failed:", err);
 		}
 
-		// Close feeds after cleanup (SDK may need connection for API calls)
-		this.accountStream?.close();
+		// Close feeds after cleanup
 		this.binanceFeed?.close();
-		this.orderbookStream?.close();
+		await this.adapter.close();
 
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
@@ -428,7 +344,7 @@ export class MarketMaker {
 		this.isUpdating = true;
 
 		try {
-			if (!this.positionTracker || !this.quoter || !this.client) {
+			if (!this.positionTracker || !this.quoter) {
 				return;
 			}
 
@@ -448,7 +364,7 @@ export class MarketMaker {
 				);
 			}
 
-			const bbo = this.orderbookStream?.getBBO() ?? null;
+			const bbo = this.adapter.getBBO();
 			const quotes = this.quoter.getQuotes(quotingCtx, bbo);
 
 			if (quotes.length === 0) {
@@ -470,17 +386,18 @@ export class MarketMaker {
 				isClose ? "close" : "normal",
 			);
 
+			const { kept, toCancel, toPlace } = diffOrders(this.activeOrders, quotes);
+
+			if (toCancel.length === 0 && toPlace.length === 0) {
+				return;
+			}
+
 			const prevOrders = this.activeOrders;
-			const newOrders = await updateQuotes(
-				this.client.user,
-				this.marketId,
-				this.activeOrders,
-				quotes,
-			);
-			this.activeOrders = newOrders;
+			const placedOrders = await this.adapter.updateQuotes(toCancel, toPlace);
+			this.activeOrders = [...kept, ...placedOrders];
 
 			// Record T2T only when orders were actually submitted to the exchange
-			if (newOrders !== prevOrders && this.lastTickTimestamp > 0) {
+			if (this.activeOrders !== prevOrders && this.lastTickTimestamp > 0) {
 				const t2t = performance.now() - this.lastTickTimestamp;
 				this.lastT2T = t2t;
 				this.t2tSamples.push(t2t);
@@ -509,6 +426,7 @@ export class MarketMaker {
 
 	private logConfig(binanceSymbol: string): void {
 		log.config({
+			Exchange: this.adapter.name,
 			Market: this.marketSymbol,
 			Binance: binanceSymbol,
 			Spread: `${this.config.spreadBps} bps`,
@@ -519,9 +437,9 @@ export class MarketMaker {
 	}
 
 	private cancelOrdersAsync(): void {
-		if (this.activeOrders.length === 0 || !this.client) return;
+		if (this.activeOrders.length === 0) return;
 		const orders = this.activeOrders;
-		cancelOrders(this.client.user, orders)
+		this.adapter.cancelOrders(orders)
 			.then(() => {
 				this.activeOrders = [];
 			})
@@ -531,15 +449,10 @@ export class MarketMaker {
 			});
 	}
 
-	private syncOrders(user: NordUser, accountId: number): void {
-		user
-			.fetchInfo()
-			.then(() => {
-				const apiOrders = (user.orders[accountId] ?? []) as ApiOrder[];
-				const marketOrders = apiOrders.filter(
-					(o) => o.marketId === this.marketId,
-				);
-				this.activeOrders = mapApiOrdersToCached(marketOrders);
+	private syncOrders(): void {
+		this.adapter.syncOrders()
+			.then((orders) => {
+				this.activeOrders = orders;
 			})
 			.catch((err) => {
 				log.error("Order sync error:", err);

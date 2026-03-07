@@ -9,11 +9,9 @@ import { log } from "../utils/logger.js";
 const RECONNECT_DELAY_MS = 3000;
 const MAX_LEVELS = 100; // Only keep top N levels (we only need BBO)
 
-// Best Bid/Offer for clamping order prices
-export interface BBO {
-	bestBid: number;
-	bestAsk: number;
-}
+// Re-export from shared types
+export type { BBO } from "../types.js";
+import type { BBO } from "../types.js";
 
 // Callback for orderbook depth updates (for display)
 export type OrderbookUpdateCallback = (

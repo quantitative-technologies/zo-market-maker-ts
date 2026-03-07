@@ -3,6 +3,10 @@
 # All values are required. Per-symbol sections override globals.
 # Merge order: global TOML → [SYMBOL] section
 
+# --- Exchange ---
+
+exchange = "zo"               # Exchange to trade on (zo, hyperliquid, ...)
+
 # --- Strategy ---
 
 spread_bps = 3                 # Spread from fair price (basis points)
@@ -10,16 +14,6 @@ take_profit_bps = 2            # Spread in close mode (basis points)
 order_size_usd = 10            # Order size in USD
 close_threshold_usd = 19       # Trigger close mode at this position size (USD)
 warmup_seconds = 10            # Samples needed before quoting
-
-# --- Operational ---
-
-update_throttle_ms = 100       # Min interval between quote updates
-order_sync_interval_ms = 3000  # Interval for syncing orders from API
-status_interval_ms = 1000      # Interval for status display
-fair_price_window_ms = 300000  # Fair price calculation window (5 minutes)
-position_sync_interval_ms = 5000   # Interval for position sync
-stale_threshold_ms = 60000     # Consider stream stale after this many ms
-stale_check_interval_ms = 10000    # How often to check for staleness
 
 # --- Per-symbol overrides ---
 
@@ -45,3 +39,13 @@ stale_check_interval_ms = 10000    # How often to check for staleness
 # [SUI]
 # spread_bps = 7
 # order_size_usd = 10
+
+# --- Operational ---
+
+update_throttle_ms = 100       # Min interval between quote updates
+order_sync_interval_ms = 3000  # Interval for syncing orders from API
+status_interval_ms = 1000      # Interval for status display
+fair_price_window_ms = 300000  # Fair price calculation window (5 minutes)
+position_sync_interval_ms = 5000   # Interval for position sync
+stale_threshold_ms = 60000     # Consider stream stale after this many ms
+stale_check_interval_ms = 10000    # How often to check for staleness

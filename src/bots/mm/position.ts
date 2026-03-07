@@ -1,6 +1,5 @@
 // Position Tracker with optimistic updates + periodic sync
 
-import type { NordUser } from "@n1xyz/nord-ts";
 import { log } from "../../utils/logger.js";
 
 export interface PositionState {
@@ -63,9 +62,11 @@ export class PositionTracker {
 		this.lastMarkPrice = price;
 	}
 
-	startSync(user: NordUser, accountId: number, marketId: number): void {
+	startSync(
+		fetchPosition: () => Promise<{ baseSize: number }>,
+	): void {
 		this.isRunning = true;
-		this.syncLoop(user, accountId, marketId);
+		this.syncLoop(fetchPosition);
 	}
 
 	stopSync(): void {
@@ -73,16 +74,14 @@ export class PositionTracker {
 	}
 
 	private async syncLoop(
-		user: NordUser,
-		accountId: number,
-		marketId: number,
+		fetchPosition: () => Promise<{ baseSize: number }>,
 	): Promise<void> {
-		await this.syncFromServer(user, accountId, marketId);
+		await this.syncFromServer(fetchPosition);
 
 		while (this.isRunning) {
 			await this.sleep(this.config.syncIntervalMs);
 			if (!this.isRunning) break;
-			await this.syncFromServer(user, accountId, marketId);
+			await this.syncFromServer(fetchPosition);
 		}
 	}
 
@@ -91,21 +90,10 @@ export class PositionTracker {
 	}
 
 	private async syncFromServer(
-		user: NordUser,
-		accountId: number,
-		marketId: number,
+		fetchPosition: () => Promise<{ baseSize: number }>,
 	): Promise<void> {
 		try {
-			await user.fetchInfo();
-
-			const positions = user.positions[accountId] || [];
-			const pos = positions.find((p) => p.marketId === marketId);
-
-			const serverSize = pos?.perp
-				? pos.perp.isLong
-					? pos.perp.baseSize
-					: -pos.perp.baseSize
-				: 0;
+			const { baseSize: serverSize } = await fetchPosition();
 
 			const sizeDelta = serverSize - this.baseSize;
 
