@@ -15,6 +15,7 @@ order_size_usd = 10            # Order size in USD
 close_threshold_usd = 19       # Trigger close mode at this position size (USD)
 close_slippage_bps = 50        # Slippage tolerance for IOC close order (basis points)
 warmup_seconds = 10            # Samples needed before quoting
+markout_horizons_ms = [1000, 5000, 30000, 60000, 120000, 300000]  # Markout observation horizons
 
 # --- Per-symbol overrides ---
 

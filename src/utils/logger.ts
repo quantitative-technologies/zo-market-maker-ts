@@ -6,13 +6,24 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Logger } from "tslog";
 
-// Display precision constants for toFixed() — used across all formatting
+// Display precision for toFixed() — initialized from exchange MarketInfo at startup.
+// BPS is a pure display choice (not exchange-provided).
 export const FMT_DECIMALS = {
-	BALANCE: 6,   // Balance amounts, base sizes ($104.655168, 0.001234)
-	PNL: 4,       // PnL values (+$0.0012)
-	PRICE: 2,     // USD prices ($100.00)
-	BPS: 1,       // Basis points, rates, milliseconds (3.5bps, 12.3ms)
-} as const;
+	PRICE: 0,     // USD prices — set from MarketInfo.priceDecimals
+	SIZE: 0,      // Base sizes — set from MarketInfo.sizeDecimals
+	QUOTE: 0,     // Quote currency (balances, PnL, fees) — set from MarketInfo.quoteDecimals
+	BPS: 1,       // Basis points, rates, milliseconds (display choice)
+};
+
+export function initFmtDecimals(marketInfo: {
+	priceDecimals: number;
+	sizeDecimals: number;
+	quoteDecimals: number;
+}): void {
+	FMT_DECIMALS.PRICE = marketInfo.priceDecimals;
+	FMT_DECIMALS.SIZE = marketInfo.sizeDecimals;
+	FMT_DECIMALS.QUOTE = marketInfo.quoteDecimals;
+}
 
 type LogOutput = (message: string) => void;
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -184,9 +195,9 @@ export const log = {
 		}
 		if (unrealizedPnL !== undefined && sizeBase !== 0) {
 			const sign = unrealizedPnL >= 0 ? "+" : "";
-			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(d.PNL)}`;
+			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(d.QUOTE)}`;
 		}
-		const msg = `POS: ${dir} ${Math.abs(sizeBase).toFixed(d.BALANCE)} ($${Math.abs(sizeUsd).toFixed(d.PRICE)})${extra}${mode}`;
+		const msg = `POS: ${dir} ${Math.abs(sizeBase).toFixed(d.SIZE)} ($${Math.abs(sizeUsd).toFixed(d.PRICE)})${extra}${mode}`;
 		this.info(msg);
 		this.fileLog("position", msg);
 	},
@@ -202,11 +213,11 @@ export const log = {
 		let pnlStr = "";
 		if (fillPnL !== undefined && fillPnL !== 0) {
 			const sign = fillPnL >= 0 ? "+" : "";
-			pnlStr += ` | fillPnL ${sign}$${fillPnL.toFixed(d.PNL)}`;
+			pnlStr += ` | fillPnL ${sign}$${fillPnL.toFixed(d.QUOTE)}`;
 		}
 		if (cumulativeRealizedPnL !== undefined) {
 			const sign = cumulativeRealizedPnL >= 0 ? "+" : "";
-			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(d.PNL)}`;
+			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(d.QUOTE)}`;
 		}
 		const msg = `FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(d.PRICE)}${pnlStr}`;
 		this.info(msg);
@@ -250,7 +261,7 @@ export const log = {
 		const uptimeMin = (summary.uptimeMs / 60000).toFixed(d.BPS);
 		const fmt = (v: number) => {
 			const sign = v >= 0 ? "+" : "";
-			return `${sign}$${v.toFixed(d.PNL)}`;
+			return `${sign}$${v.toFixed(d.QUOTE)}`;
 		};
 		const line = `SESSION: uptime=${uptimeMin}min fills=${summary.fillCount} vol=$${summary.totalVolumeUsd.toFixed(d.PRICE)} rPnL=${fmt(summary.realizedPnL)} uPnL=${fmt(summary.unrealizedPnL)} net=${fmt(summary.netPnL)} spread=${summary.avgSpreadCapturedBps.toFixed(d.PRICE)}bps`;
 		this.fileLog("position", line);
@@ -277,16 +288,32 @@ export const log = {
 		const d = FMT_DECIMALS;
 		const fmt = (v: number) => {
 			const sign = v >= 0 ? "+" : "";
-			return `${sign}$${v.toFixed(d.BALANCE)}`;
+			return `${sign}$${v.toFixed(d.QUOTE)}`;
 		};
 		this.info("═══ BALANCE SUMMARY ═══");
-		this.info(`  Starting:   $${summary.startingBalance.toFixed(d.BALANCE)}`);
-		this.info(`  Current:    $${summary.currentBalance.toFixed(d.BALANCE)}`);
+		this.info(`  Starting:   $${summary.startingBalance.toFixed(d.QUOTE)}`);
+		this.info(`  Current:    $${summary.currentBalance.toFixed(d.QUOTE)}`);
 		this.info(`  Net Change: ${fmt(summary.netChange)}`);
 		this.info(`  Funding:    ${fmt(summary.totalFunding)}`);
 		this.info(`  Est. Fees:  ${fmt(summary.totalFees)}`);
 		this.info(`  Syncs:      ${summary.syncCount}`);
 		this.info("═══════════════════════");
+	},
+
+	analyticsSummary(summary: {
+		markouts: { horizonMs: number; count: number; avgBps: number }[];
+		fillRate: number;
+		quoteUpdateCount: number;
+	}): void {
+		const d = FMT_DECIMALS;
+		this.info("═══ ANALYTICS ═══");
+		for (const m of summary.markouts) {
+			const label = m.horizonMs >= 1000 ? `${m.horizonMs / 1000}s` : `${m.horizonMs}ms`;
+			const sign = m.avgBps >= 0 ? "+" : "";
+			this.info(`  Markout ${label}: ${sign}${m.avgBps.toFixed(d.BPS)}bps (n=${m.count})`);
+		}
+		this.info(`  Fill Rate:  ${(summary.fillRate * 100).toFixed(d.BPS)}% (${summary.quoteUpdateCount} updates)`);
+		this.info("═════════════════");
 	},
 
 	shutdown(): void {

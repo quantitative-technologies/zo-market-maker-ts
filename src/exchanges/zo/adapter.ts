@@ -1,7 +1,7 @@
 // Zo Exchange adapter — wraps existing src/sdk/* modules
 
 import Decimal from "decimal.js";
-import type { BalanceSnapshot, ExchangeAdapter, FeeRateInfo } from "../adapter.js";
+import type { BalanceSnapshot, ExchangeAdapter, FeeRateInfo, TradeRecord } from "../adapter.js";
 import { AccountStream } from "../../sdk/account.js";
 import { createZoClient, type ZoClient } from "../../sdk/client.js";
 import {
@@ -79,6 +79,13 @@ export class ZoAdapter implements ExchangeAdapter {
 		this.marketId = market.marketId;
 		this.sizeDecimals = market.sizeDecimals;
 
+		// Look up quote token precision
+		const quoteToken = nord.tokens.find((t) => t.tokenId === market.quoteTokenId);
+		if (!quoteToken) {
+			throw new Error(`Quote token ID ${market.quoteTokenId} not found in exchange token list`);
+		}
+		const quoteDecimals = quoteToken.decimals;
+
 		// Initialize streams
 		this.accountStream = new AccountStream(
 			nord,
@@ -114,6 +121,7 @@ export class ZoAdapter implements ExchangeAdapter {
 			symbol: market.symbol,
 			priceDecimals: market.priceDecimals,
 			sizeDecimals: market.sizeDecimals,
+			quoteDecimals,
 		};
 	}
 
@@ -165,6 +173,51 @@ export class ZoAdapter implements ExchangeAdapter {
 			: 0;
 
 		return { baseSize };
+	}
+
+	async fetchTrades(since: string): Promise<TradeRecord[]> {
+		const { nord, accountId } = this.requireClient();
+
+		// Query for trades where we are the maker or taker
+		const [makerResponse, takerResponse] = await Promise.all([
+			nord.getTrades({
+				makerId: accountId,
+				marketId: this.marketId,
+				since,
+			}),
+			nord.getTrades({
+				takerId: accountId,
+				marketId: this.marketId,
+				since,
+			}),
+		]);
+
+		// Merge and deduplicate by tradeId
+		const allTrades = new Map<number, (typeof makerResponse.items)[number]>();
+		for (const trade of makerResponse.items) {
+			allTrades.set(trade.tradeId, trade);
+		}
+		for (const trade of takerResponse.items) {
+			allTrades.set(trade.tradeId, trade);
+		}
+
+		// Sort by tradeId (chronological) and map to TradeRecord
+		return [...allTrades.values()]
+			.sort((a, b) => a.tradeId - b.tradeId)
+			.map((trade) => {
+				const isMaker = trade.makerId === accountId;
+				// Our side: if we're the maker, our side is opposite of takerSide
+				const side: "bid" | "ask" = isMaker
+					? (trade.takerSide === "bid" ? "ask" : "bid")
+					: trade.takerSide;
+				return {
+					tradeId: trade.tradeId,
+					side,
+					baseSize: trade.baseSize,
+					price: trade.price,
+					isMaker,
+				};
+			});
 	}
 
 	async fetchBalanceSnapshot(): Promise<BalanceSnapshot> {

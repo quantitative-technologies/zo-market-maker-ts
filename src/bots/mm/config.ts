@@ -25,6 +25,7 @@ export interface MarketMakerConfig {
   readonly staleThresholdMs: number // Consider stream stale after this many ms
   readonly balanceSyncIntervalMs: number // Interval for balance sync
   readonly staleCheckIntervalMs: number // How often to check for staleness
+  readonly markoutHorizonsMs: readonly number[] // Markout observation horizons (ms)
 }
 
 // snake_case TOML key → camelCase config field
@@ -103,7 +104,22 @@ export function loadConfig(symbol: string, configPath?: string): MarketMakerConf
     );
   }
 
-  const config = { exchange, symbol, ...merged } as MarketMakerConfig;
+  // Extract array config: markout_horizons_ms
+  const rawHorizons = (symbolSection && typeof symbolSection === "object" && !Array.isArray(symbolSection)
+    ? (symbolSection as Record<string, unknown>).markout_horizons_ms
+    : undefined)
+    ?? (toml as Record<string, unknown>).markout_horizons_ms;
+  if (!Array.isArray(rawHorizons)) {
+    throw new Error(`Missing required config key "markout_horizons_ms" in ${filePath}. Example: markout_horizons_ms = [1000, 5000, 30000]`);
+  }
+  const markoutHorizonsMs = rawHorizons.map((v, i) => {
+    if (typeof v !== "number") {
+      throw new Error(`markout_horizons_ms[${i}] must be a number, got ${typeof v}`);
+    }
+    return v;
+  });
+
+  const config = { exchange, symbol, ...merged, markoutHorizonsMs } as MarketMakerConfig;
 
   const symbolKeys = Object.keys(symbolValues);
   if (symbolKeys.length > 0) {

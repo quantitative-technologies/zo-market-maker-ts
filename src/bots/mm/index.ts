@@ -11,9 +11,10 @@ import {
 import type { ExchangeAdapter } from "../../exchanges/adapter.js";
 import { diffOrders } from "../../orders.js";
 import type { CachedOrder, FillEvent, MidPrice } from "../../types.js";
-import { FMT_DECIMALS, log } from "../../utils/logger.js";
+import { FMT_DECIMALS, initFmtDecimals, log } from "../../utils/logger.js";
 import type { MarketMakerConfig } from "./config.js";
 import { type BalanceConfig, BalanceTracker } from "./balance.js";
+import { AnalyticsTracker } from "./analytics.js";
 import { POSITION_EPSILON, type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
 
@@ -63,6 +64,7 @@ export class MarketMaker {
 	private fairPriceCalc: FairPriceProvider | null = null;
 	private positionTracker: PositionTracker | null = null;
 	private balanceTracker: BalanceTracker | null = null;
+	private analyticsTracker: AnalyticsTracker | null = null;
 	private quoter: Quoter | null = null;
 	private isRunning = false;
 	private lastLoggedSampleCount = -1;
@@ -103,6 +105,7 @@ export class MarketMaker {
 		);
 
 		const marketInfo = await this.adapter.connect();
+		initFmtDecimals(marketInfo);
 		this.marketSymbol = marketInfo.symbol;
 		this.priceDecimals = marketInfo.priceDecimals;
 		this.sizeDecimals = marketInfo.sizeDecimals;
@@ -133,6 +136,14 @@ export class MarketMaker {
 			this.config.takeProfitBps,
 			this.config.orderSizeUsd,
 		);
+		this.analyticsTracker = new AnalyticsTracker(
+			() => {
+				const bp = this.binanceFeed?.getMidPrice();
+				if (!bp) return null;
+				return this.fairPriceCalc?.getFairPrice(bp.mid) ?? null;
+			},
+			this.config.markoutHorizonsMs,
+		);
 
 		// Initialize Binance reference feed
 		this.binanceFeed = new BinancePriceFeed(
@@ -150,6 +161,11 @@ export class MarketMaker {
 				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
 
 			this.balanceTracker?.recordFill(fill.side, fill.size, fill.price);
+
+			// Record fill for markout analytics
+			const bp = this.binanceFeed?.getMidPrice();
+			const fairAtFill = bp ? (this.fairPriceCalc?.getFairPrice(bp.mid) ?? fill.price) : fill.price;
+			this.analyticsTracker?.recordFill(fill.side, fill.size, fill.price, fairAtFill);
 
 			log.fill(
 				fill.side === "bid" ? "buy" : "sell",
@@ -251,10 +267,7 @@ export class MarketMaker {
 		// Initialize file loggers for position and balance tracking
 		log.initFileLoggers(this.config.symbol);
 
-		// Start position sync
-		this.positionTracker?.startSync(() => this.adapter.fetchPosition());
-
-		// Initialize and start balance sync
+		// Initialize and start balance sync (before position sync, so fee rates are available)
 		if (this.balanceTracker) {
 			await this.balanceTracker.initialize(
 				() => this.adapter.fetchBalanceSnapshot(),
@@ -264,6 +277,18 @@ export class MarketMaker {
 				() => this.adapter.fetchBalanceSnapshot(),
 			);
 		}
+
+		// Pass fee rates to position tracker for fill recovery cost estimation
+		const feeRate = this.balanceTracker?.getFeeRate();
+		if (feeRate && this.positionTracker) {
+			this.positionTracker.setFeeRates(feeRate.makerFeePpm, feeRate.takerFeePpm);
+		}
+
+		// Start position sync with trade recovery support
+		this.positionTracker?.startSync(
+			() => this.adapter.fetchPosition(),
+			(since) => this.adapter.fetchTrades(since),
+		);
 	}
 
 	private startIntervals(): void {
@@ -392,6 +417,16 @@ export class MarketMaker {
 			log.balanceSummary(this.balanceTracker.getSessionSummary());
 		}
 
+		// Analytics summary and fill dump
+		if (this.analyticsTracker && this.positionTracker) {
+			const fillCount = this.positionTracker.getSessionSummary(markPrice).fillCount;
+			const analyticsSummary = this.analyticsTracker.getSummary(fillCount);
+			log.analyticsSummary(analyticsSummary);
+			this.analyticsTracker.writeFillsToFile(
+				`logs/${this.config.symbol.toLowerCase()}-fills.jsonl`,
+			);
+		}
+
 		log.info("SHUTDOWN: complete");
 		process.exit(0);
 	}
@@ -453,6 +488,7 @@ export class MarketMaker {
 				return;
 			}
 
+			this.analyticsTracker?.recordQuoteUpdate();
 			const prevOrders = this.activeOrders;
 			const placedOrders = await this.adapter.updateQuotes(toCancel, toPlace);
 			this.activeOrders = [...kept, ...placedOrders];
@@ -558,7 +594,7 @@ export class MarketMaker {
 		}
 
 		log.info(
-			`STATUS: pos=${pos.toFixed(d.BALANCE)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(d.PNL)} | rPnL=${rSign}$${rPnL.toFixed(d.PNL)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
+			`STATUS: pos=${pos.toFixed(d.SIZE)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(d.QUOTE)} | rPnL=${rSign}$${rPnL.toFixed(d.QUOTE)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
 		);
 	}
 }

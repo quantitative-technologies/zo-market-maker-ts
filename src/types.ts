@@ -50,4 +50,5 @@ export interface MarketInfo {
 	symbol: string;
 	priceDecimals: number;
 	sizeDecimals: number;
+	quoteDecimals: number; // Quote token precision (e.g. 6 for USDC)
 }

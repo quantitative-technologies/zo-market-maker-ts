@@ -1,5 +1,6 @@
 // Position Tracker with optimistic updates + periodic sync
 
+import type { TradeRecord } from "../../exchanges/adapter.js";
 import { FMT_DECIMALS, log } from "../../utils/logger.js";
 
 // Floating point epsilon for position size zero-comparison.
@@ -38,7 +39,25 @@ export interface SessionSummary {
 	readonly avgSpreadCapturedBps: number;
 }
 
+export interface RecoveredTrade {
+	readonly side: "bid" | "ask";
+	readonly size: number;
+	readonly price: number;
+	readonly realizedPnL: number;
+	readonly fee: number;
+	readonly isMaker: boolean;
+	readonly tradeId: number;
+}
+
+export interface FillRecoveryResult {
+	readonly trades: RecoveredTrade[];
+	readonly totalRealizedPnL: number;
+	readonly totalFees: number;
+}
+
 type DriftCallback = (sizeDelta: number, newBaseSize: number) => void;
+type FetchPosition = () => Promise<{ baseSize: number }>;
+type FetchTrades = (since: string) => Promise<TradeRecord[]>;
 
 export interface PositionConfig {
 	readonly closeThresholdUsd: number; // Trigger close mode when position >= this
@@ -55,6 +74,11 @@ export class PositionTracker {
 	private sessionStartTime = Date.now();
 	private onDrift: DriftCallback | null = null;
 	private lastMarkPrice = 0;
+	private lastSyncTime: string | null = null;
+	private lastTradeId = 0;
+	private fetchTrades: FetchTrades | null = null;
+	private makerFeePpm = 0;
+	private takerFeePpm = 0;
 
 	constructor(private readonly config: PositionConfig) {}
 
@@ -66,15 +90,27 @@ export class PositionTracker {
 		this.lastMarkPrice = price;
 	}
 
+	setFeeRates(makerFeePpm: number, takerFeePpm: number): void {
+		this.makerFeePpm = makerFeePpm;
+		this.takerFeePpm = takerFeePpm;
+	}
+
 	startSync(
-		fetchPosition: () => Promise<{ baseSize: number }>,
+		fetchPosition: FetchPosition,
+		fetchTrades?: FetchTrades,
 	): void {
 		this.isRunning = true;
+		this.fetchTrades = fetchTrades ?? null;
+		this.lastSyncTime = new Date().toISOString();
 		this.syncLoop(fetchPosition);
 	}
 
 	stopSync(): void {
 		this.isRunning = false;
+	}
+
+	async reconcileWithExchange(fetchPosition: FetchPosition): Promise<void> {
+		await this.syncFromServer(fetchPosition);
 	}
 
 	private async syncLoop(
@@ -94,65 +130,104 @@ export class PositionTracker {
 	}
 
 	private async syncFromServer(
-		fetchPosition: () => Promise<{ baseSize: number }>,
+		fetchPosition: FetchPosition,
 	): Promise<void> {
 		try {
 			const { baseSize: serverSize } = await fetchPosition();
+			const d = FMT_DECIMALS;
 
-			const sizeDelta = serverSize - this.baseSize;
+			const sizeDiscrepancy = Math.abs(serverSize - this.baseSize) > 0.0001;
 
-			if (Math.abs(sizeDelta) > 0.0001) {
-				const d = FMT_DECIMALS;
+			if (sizeDiscrepancy) {
 				log.warn(
-					`Position drift detected: local=${this.baseSize.toFixed(d.BALANCE)}, server=${serverSize.toFixed(d.BALANCE)}, delta=${sizeDelta.toFixed(d.BALANCE)}`,
+					`Position sync: size mismatch — local=${this.baseSize.toFixed(d.SIZE)}, server=${serverSize.toFixed(d.SIZE)}`,
 				);
 
-				// Process as a synthetic fill so PnL tracking stays correct
-				const fillSide: "bid" | "ask" =
-					sizeDelta > 0 ? "bid" : "ask";
-				const fillSize = Math.abs(sizeDelta);
-				const approxPrice = this.lastMarkPrice || 0;
-
-				if (approxPrice > 0) {
-					const fillPnL = this.applyFill(
-						fillSide,
-						fillSize,
-						approxPrice,
-					);
-
-					log.fill(
-						fillSide === "bid" ? "buy" : "sell",
-						approxPrice,
-						fillSize,
-						fillPnL !== 0 ? fillPnL : undefined,
-						this.realizedPnL,
-					);
-					log.warn(
-						`Missed fill recovered via sync: ${fillSide} ${fillSize.toFixed(d.BALANCE)} @ ~$${approxPrice.toFixed(d.PRICE)} (approx)`,
-					);
-				} else {
-					// No price available — force-correct position without PnL
-					log.warn(
-						"No mark price available for missed fill PnL — forcing position sync",
-					);
-					const previousBase = this.baseSize;
-					this.baseSize = serverSize;
-					if (
-						(previousBase > 0 && serverSize < 0) ||
-						(previousBase < 0 && serverSize > 0) ||
-						serverSize === 0
-					) {
-						this.avgEntryPrice = 0;
+				// Attempt fill recovery via getTrades()
+				const recovery = await this.recoverMissedFills();
+				if (recovery && recovery.trades.length > 0) {
+					for (const trade of recovery.trades) {
+						log.fill(
+							trade.side === "bid" ? "buy" : "sell",
+							trade.price,
+							trade.size,
+							trade.realizedPnL !== 0 ? trade.realizedPnL : undefined,
+							this.realizedPnL,
+						);
+						log.warn(
+							`Recovered fill: ${trade.side} ${trade.size} @ $${trade.price.toFixed(d.PRICE)} (${trade.isMaker ? "maker" : "taker"}, fee=$${trade.fee.toFixed(d.QUOTE)})`,
+						);
 					}
+				}
+
+				// After recovery, force-overwrite local state from exchange truth
+				if (this.baseSize !== serverSize) {
+					log.warn(
+						`Position sync: overwriting local state — size ${this.baseSize.toFixed(d.SIZE)} → ${serverSize.toFixed(d.SIZE)}`,
+					);
+					this.baseSize = serverSize;
 				}
 
 				// Notify bot about drift (e.g., to enter close mode)
 				if (this.onDrift) {
-					this.onDrift(sizeDelta, this.baseSize);
+					this.onDrift(serverSize - this.baseSize, this.baseSize);
 				}
 			}
+
+			this.lastSyncTime = new Date().toISOString();
 		} catch (err) {
 			log.error("Position sync error:", err);
+		}
+	}
+
+	private async recoverMissedFills(): Promise<FillRecoveryResult | null> {
+		if (!this.fetchTrades || !this.lastSyncTime) return null;
+
+		try {
+			const trades = await this.fetchTrades(this.lastSyncTime);
+
+			// Filter to trades we haven't seen
+			const newTrades = trades.filter((t) => t.tradeId > this.lastTradeId);
+			if (newTrades.length === 0) return { trades: [], totalRealizedPnL: 0, totalFees: 0 };
+
+			const recovered: RecoveredTrade[] = [];
+			let totalRealizedPnL = 0;
+			let totalFees = 0;
+
+			for (const trade of newTrades) {
+				const feePpm = trade.isMaker ? this.makerFeePpm : this.takerFeePpm;
+				const fee = (trade.baseSize * trade.price * feePpm) / 1_000_000;
+
+				const fillRealizedPnL = this.applyFill(
+					trade.side,
+					trade.baseSize,
+					trade.price,
+				);
+
+				recovered.push({
+					side: trade.side,
+					size: trade.baseSize,
+					price: trade.price,
+					realizedPnL: fillRealizedPnL,
+					fee,
+					isMaker: trade.isMaker,
+					tradeId: trade.tradeId,
+				});
+
+				totalRealizedPnL += fillRealizedPnL;
+				totalFees += fee;
+				this.lastTradeId = trade.tradeId;
+			}
+
+			const d = FMT_DECIMALS;
+			log.info(
+				`Fill recovery: ${recovered.length} trades recovered, rPnL=$${totalRealizedPnL.toFixed(d.QUOTE)}, fees=$${totalFees.toFixed(d.QUOTE)}`,
+			);
+
+			return { trades: recovered, totalRealizedPnL, totalFees };
+		} catch (err) {
+			log.error("Fill recovery via getTrades() failed:", err);
+			return null;
 		}
 	}
 
@@ -203,7 +278,7 @@ export class PositionTracker {
 
 		const d = FMT_DECIMALS;
 		log.debug(
-			`Position updated: ${this.baseSize.toFixed(d.BALANCE)} (${side} ${size} @ $${price.toFixed(d.PRICE)}) | entry=$${this.avgEntryPrice.toFixed(d.PRICE)} | rPnL=$${this.realizedPnL.toFixed(d.PNL)}`,
+			`Position updated: ${this.baseSize.toFixed(d.SIZE)} (${side} ${size} @ $${price.toFixed(d.PRICE)}) | entry=$${this.avgEntryPrice.toFixed(d.PRICE)} | rPnL=$${this.realizedPnL.toFixed(d.QUOTE)}`,
 		);
 
 		return fillRealizedPnL;

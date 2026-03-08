@@ -58,10 +58,10 @@ export class BalanceTracker {
 		this.currentBalance = this.startingBalance;
 		log.fileLog(
 			"balance",
-			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(d.BALANCE)}`,
+			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(d.QUOTE)}`,
 		);
 		log.info(
-			`BALANCE: starting balance $${this.startingBalance.toFixed(d.BALANCE)}`,
+			`BALANCE: starting balance $${this.startingBalance.toFixed(d.QUOTE)}`,
 		);
 
 		// Fetch fee rates
@@ -106,7 +106,7 @@ export class BalanceTracker {
 		this.pendingFeeAccumulator += fee;
 		log.fileLog(
 			"balance",
-			`FILL_FEE: ${side} ${size}@${price.toFixed(d.PRICE)} fee=$${fee.toFixed(d.BALANCE)}`,
+			`FILL_FEE: ${side} ${size}@${price.toFixed(d.PRICE)} fee=$${fee.toFixed(d.QUOTE)}`,
 		);
 	}
 
@@ -181,13 +181,13 @@ export class BalanceTracker {
 				const d = FMT_DECIMALS;
 				const fmt = (v: number) => {
 					const sign = v >= 0 ? "+" : "";
-					return `${sign}$${v.toFixed(d.BALANCE)}`;
+					return `${sign}$${v.toFixed(d.QUOTE)}`;
 				};
 
 				if (balanceChange !== 0) {
 					log.fileLog(
 						"balance",
-						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(d.BALANCE)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | estFees=${fmt(feesDelta)}`,
+						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(d.QUOTE)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | estFees=${fmt(feesDelta)}`,
 					);
 				}
 			}

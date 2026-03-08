@@ -21,6 +21,14 @@ export interface FeeRateInfo {
 	readonly takerFeePpm: number;
 }
 
+export interface TradeRecord {
+	readonly tradeId: number;
+	readonly side: "bid" | "ask"; // Our side
+	readonly baseSize: number;
+	readonly price: number;
+	readonly isMaker: boolean;
+}
+
 export interface ExchangeAdapter {
 	readonly name: string;
 
@@ -43,6 +51,7 @@ export interface ExchangeAdapter {
 
 	// Position
 	fetchPosition(): Promise<{ baseSize: number }>;
+	fetchTrades(since: string): Promise<TradeRecord[]>;
 
 	// Balance
 	fetchBalanceSnapshot(): Promise<BalanceSnapshot>;
