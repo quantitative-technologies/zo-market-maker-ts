@@ -98,6 +98,10 @@ export class PositionTracker {
 		this.isRunning = false;
 	}
 
+	async reconcileWithExchange(user: NordUser): Promise<void> {
+		await this.syncFromServer(user, this.accountId, this.marketId);
+	}
+
 	private async syncLoop(
 		user: NordUser,
 		accountId: number,
