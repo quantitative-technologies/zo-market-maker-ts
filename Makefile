@@ -1,4 +1,4 @@
-.PHONY: build start stop restart logs ps clean bench
+.PHONY: build start stop restart logs ps clean clean-logs bench
 
 build:
 	docker compose build
@@ -21,6 +21,9 @@ ps:
 
 clean:
 	docker compose down --rmi local
+
+clean-logs:
+	rm -f logs/*.log
 
 bench:
 	npm run bench:run

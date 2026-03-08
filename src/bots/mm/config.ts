@@ -22,6 +22,7 @@ export interface MarketMakerConfig {
   readonly fairPriceWindowMs: number // Window for fair price calculation
   readonly positionSyncIntervalMs: number // Interval for position sync
   readonly staleThresholdMs: number // Consider stream stale after this many ms
+  readonly balanceSyncIntervalMs: number // Interval for balance sync
   readonly staleCheckIntervalMs: number // How often to check for staleness
 }
 
@@ -39,6 +40,7 @@ const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol' | 'exchange
   status_interval_ms: 'statusIntervalMs',
   fair_price_window_ms: 'fairPriceWindowMs',
   position_sync_interval_ms: 'positionSyncIntervalMs',
+  balance_sync_interval_ms: 'balanceSyncIntervalMs',
   stale_threshold_ms: 'staleThresholdMs',
   stale_check_interval_ms: 'staleCheckIntervalMs',
 }

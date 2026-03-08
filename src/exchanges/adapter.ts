@@ -10,6 +10,17 @@ import type {
 	Quote,
 } from "../types.js";
 
+export interface BalanceSnapshot {
+	readonly balance: number;
+	readonly fundingPnlByMarket: Map<number, number>;
+}
+
+export interface FeeRateInfo {
+	readonly feeTierId: number;
+	readonly makerFeePpm: number;
+	readonly takerFeePpm: number;
+}
+
 export interface ExchangeAdapter {
 	readonly name: string;
 
@@ -32,6 +43,10 @@ export interface ExchangeAdapter {
 
 	// Position
 	fetchPosition(): Promise<{ baseSize: number }>;
+
+	// Balance
+	fetchBalanceSnapshot(): Promise<BalanceSnapshot>;
+	fetchFeeRates(): Promise<FeeRateInfo>;
 
 	// Orderbook state (synchronous reads of cached state)
 	getMidPrice(): MidPrice | null;

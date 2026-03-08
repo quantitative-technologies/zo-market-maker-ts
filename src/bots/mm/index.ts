@@ -11,8 +11,9 @@ import {
 import type { ExchangeAdapter } from "../../exchanges/adapter.js";
 import { diffOrders } from "../../orders.js";
 import type { CachedOrder, FillEvent, MidPrice } from "../../types.js";
-import { log } from "../../utils/logger.js";
+import { FMT_DECIMALS, log } from "../../utils/logger.js";
 import type { MarketMakerConfig } from "./config.js";
+import { type BalanceConfig, BalanceTracker } from "./balance.js";
 import { type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
 
@@ -56,10 +57,12 @@ function deriveBinanceSymbol(marketSymbol: string): string {
 
 export class MarketMaker {
 	private marketSymbol = "";
-	private priceDecimals = 2;
+	private priceDecimals = 0;
+	private sizeDecimals = 0;
 	private binanceFeed: BinancePriceFeed | null = null;
 	private fairPriceCalc: FairPriceProvider | null = null;
 	private positionTracker: PositionTracker | null = null;
+	private balanceTracker: BalanceTracker | null = null;
 	private quoter: Quoter | null = null;
 	private isRunning = false;
 	private lastLoggedSampleCount = -1;
@@ -102,6 +105,7 @@ export class MarketMaker {
 		const marketInfo = await this.adapter.connect();
 		this.marketSymbol = marketInfo.symbol;
 		this.priceDecimals = marketInfo.priceDecimals;
+		this.sizeDecimals = marketInfo.sizeDecimals;
 
 		const binanceSymbol = deriveBinanceSymbol(marketInfo.symbol);
 		this.logConfig(binanceSymbol);
@@ -115,9 +119,13 @@ export class MarketMaker {
 			closeThresholdUsd: this.config.closeThresholdUsd,
 			syncIntervalMs: this.config.positionSyncIntervalMs,
 		};
+		const balanceConfig: BalanceConfig = {
+			syncIntervalMs: this.config.balanceSyncIntervalMs,
+		};
 
 		this.fairPriceCalc = new FairPriceCalculator(fairPriceConfig);
 		this.positionTracker = new PositionTracker(positionConfig);
+		this.balanceTracker = new BalanceTracker(balanceConfig);
 		this.quoter = new Quoter(
 			marketInfo.priceDecimals,
 			marketInfo.sizeDecimals,
@@ -140,6 +148,8 @@ export class MarketMaker {
 		this.adapter.onFill = (fill: FillEvent) => {
 			const fillPnL =
 				this.positionTracker?.applyFill(fill.side, fill.size, fill.price) ?? 0;
+
+			this.balanceTracker?.recordFill(fill.side, fill.size, fill.price);
 
 			log.fill(
 				fill.side === "bid" ? "buy" : "sell",
@@ -202,7 +212,7 @@ export class MarketMaker {
 		// Log ready on first valid fair price
 		if (this.lastLoggedSampleCount < this.config.warmupSeconds) {
 			this.lastLoggedSampleCount = this.config.warmupSeconds;
-			log.info(`Ready! Fair price: $${fairPrice.toFixed(2)}`);
+			log.info(`Ready! Fair price: $${fairPrice.toFixed(FMT_DECIMALS.PRICE)}`);
 		}
 
 		this.throttledUpdate?.(fairPrice);
@@ -219,6 +229,7 @@ export class MarketMaker {
 	}
 
 	private logWarmupProgress(binancePrice: MidPrice): void {
+		const d = FMT_DECIMALS;
 		const state = this.fairPriceCalc?.getState();
 		if (!state || state.samples === this.lastLoggedSampleCount) return;
 
@@ -226,10 +237,10 @@ export class MarketMaker {
 		const exchangePrice = this.adapter.getMidPrice();
 		const offsetBps =
 			state.offset !== null && binancePrice.mid > 0
-				? ((state.offset / binancePrice.mid) * 10000).toFixed(1)
+				? ((state.offset / binancePrice.mid) * 10000).toFixed(d.BPS)
 				: "--";
 		log.info(
-			`Warming up: ${state.samples}/${this.config.warmupSeconds} samples | Binance $${binancePrice.mid.toFixed(2)} | ${this.adapter.name} $${exchangePrice?.mid.toFixed(2) ?? "--"} | Offset ${offsetBps}bps`,
+			`Warming up: ${state.samples}/${this.config.warmupSeconds} samples | Binance $${binancePrice.mid.toFixed(d.PRICE)} | ${this.adapter.name} $${exchangePrice?.mid.toFixed(d.PRICE) ?? "--"} | Offset ${offsetBps}bps`,
 		);
 	}
 
@@ -237,8 +248,22 @@ export class MarketMaker {
 		this.activeOrders = await this.adapter.syncOrders();
 		log.info(`Synced ${this.activeOrders.length} existing orders`);
 
+		// Initialize file loggers for position and balance tracking
+		log.initFileLoggers(this.config.symbol);
+
 		// Start position sync
 		this.positionTracker?.startSync(() => this.adapter.fetchPosition());
+
+		// Initialize and start balance sync
+		if (this.balanceTracker) {
+			await this.balanceTracker.initialize(
+				() => this.adapter.fetchBalanceSnapshot(),
+				() => this.adapter.fetchFeeRates(),
+			);
+			this.balanceTracker.startSync(
+				() => this.adapter.fetchBalanceSnapshot(),
+			);
+		}
 	}
 
 	private startIntervals(): void {
@@ -272,6 +297,7 @@ export class MarketMaker {
 		this.isRunning = false;
 		this.throttledUpdate?.cancel();
 		this.positionTracker?.stopSync();
+		this.balanceTracker?.stopSync();
 
 		if (this.statusInterval) {
 			clearInterval(this.statusInterval);
@@ -329,6 +355,18 @@ export class MarketMaker {
 		if (this.positionTracker) {
 			const summary = this.positionTracker.getSessionSummary(markPrice);
 			log.sessionSummary(summary);
+		}
+
+		// Final balance sync and summary
+		if (this.balanceTracker) {
+			try {
+				await this.balanceTracker.finalSync(
+					() => this.adapter.fetchBalanceSnapshot(),
+				);
+			} catch (err) {
+				log.error("SHUTDOWN: final balance sync failed:", err);
+			}
+			log.balanceSummary(this.balanceTracker.getSessionSummary());
 		}
 
 		log.info("SHUTDOWN: complete");
@@ -461,13 +499,14 @@ export class MarketMaker {
 
 	private logStatus(): void {
 		if (!this.isRunning) return;
+		const d = FMT_DECIMALS;
 
 		const pos = this.positionTracker?.getBaseSize() ?? 0;
 		const bids = this.activeOrders.filter((o) => o.side === "bid");
 		const asks = this.activeOrders.filter((o) => o.side === "ask");
 
 		const formatOrder = (o: CachedOrder) =>
-			`$${o.price.toFixed(2)}x${o.size.toString()}`;
+			`$${o.price.toFixed(d.PRICE)}x${o.size.toString()}`;
 
 		const bidStr = bids.map(formatOrder).join(",") || "-";
 		const askStr = asks.map(formatOrder).join(",") || "-";
@@ -484,7 +523,7 @@ export class MarketMaker {
 			? (this.positionTracker?.getUnrealizedPnL(fairPrice) ?? 0)
 			: 0;
 
-		const entryStr = entry > 0 ? ` entry=$${entry.toFixed(2)}` : "";
+		const entryStr = entry > 0 ? ` entry=$${entry.toFixed(d.PRICE)}` : "";
 		const rSign = rPnL >= 0 ? "+" : "";
 		const uSign = uPnL >= 0 ? "+" : "";
 
@@ -492,11 +531,11 @@ export class MarketMaker {
 		if (this.lastT2T > 0) {
 			const avg =
 				this.t2tSamples.reduce((a, b) => a + b, 0) / this.t2tSamples.length;
-			t2tStr = ` | t2t=${this.lastT2T.toFixed(1)}ms avg=${avg.toFixed(1)}ms`;
+			t2tStr = ` | t2t=${this.lastT2T.toFixed(d.BPS)}ms avg=${avg.toFixed(d.BPS)}ms`;
 		}
 
 		log.info(
-			`STATUS: pos=${pos.toFixed(5)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(4)} | rPnL=${rSign}$${rPnL.toFixed(4)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
+			`STATUS: pos=${pos.toFixed(d.BALANCE)}${entryStr} | uPnL=${uSign}$${uPnL.toFixed(d.PNL)} | rPnL=${rSign}$${rPnL.toFixed(d.PNL)}${t2tStr} | bid=[${bidStr}] | ask=[${askStr}]`,
 		);
 	}
 }

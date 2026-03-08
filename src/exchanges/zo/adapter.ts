@@ -1,7 +1,7 @@
 // Zo Exchange adapter — wraps existing src/sdk/* modules
 
 import Decimal from "decimal.js";
-import type { ExchangeAdapter } from "../adapter.js";
+import type { BalanceSnapshot, ExchangeAdapter, FeeRateInfo } from "../adapter.js";
 import { AccountStream } from "../../sdk/account.js";
 import { createZoClient, type ZoClient } from "../../sdk/client.js";
 import {
@@ -53,6 +53,7 @@ export class ZoAdapter implements ExchangeAdapter {
 
 	private client: ZoClient | null = null;
 	private marketId = 0;
+	private sizeDecimals = 0;
 	private accountStream: AccountStream | null = null;
 	private orderbookStream: ZoOrderbookStream | null = null;
 
@@ -76,6 +77,7 @@ export class ZoAdapter implements ExchangeAdapter {
 			);
 		}
 		this.marketId = market.marketId;
+		this.sizeDecimals = market.sizeDecimals;
 
 		// Initialize streams
 		this.accountStream = new AccountStream(
@@ -163,6 +165,43 @@ export class ZoAdapter implements ExchangeAdapter {
 			: 0;
 
 		return { baseSize };
+	}
+
+	async fetchBalanceSnapshot(): Promise<BalanceSnapshot> {
+		const { user, accountId } = this.requireClient();
+		await user.fetchInfo();
+
+		const balanceEntries = user.balances[accountId] ?? [];
+		const balance = balanceEntries.length > 0 ? balanceEntries[0].balance : 0;
+
+		const fundingPnlByMarket = new Map<number, number>();
+		const positions = user.positions[accountId] ?? [];
+		for (const pos of positions) {
+			if (pos.perp) {
+				fundingPnlByMarket.set(pos.marketId, pos.perp.fundingPaymentPnl);
+			}
+		}
+
+		return { balance, fundingPnlByMarket };
+	}
+
+	async fetchFeeRates(): Promise<FeeRateInfo> {
+		const { nord, accountId } = this.requireClient();
+
+		const [tierId, brackets] = await Promise.all([
+			nord.getAccountFeeTier(accountId),
+			nord.getFeeBrackets(),
+		]);
+		const bracket = brackets.find(([id]) => id === tierId);
+		if (!bracket) {
+			throw new Error(`Fee tier ${tierId} not found in brackets`);
+		}
+		const [, config] = bracket;
+		return {
+			feeTierId: tierId,
+			makerFeePpm: config.maker_fee_ppm,
+			takerFeePpm: config.taker_fee_ppm,
+		};
 	}
 
 	getMidPrice(): MidPrice | null {

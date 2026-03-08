@@ -1,6 +1,6 @@
 // Position Tracker with optimistic updates + periodic sync
 
-import { log } from "../../utils/logger.js";
+import { FMT_DECIMALS, log } from "../../utils/logger.js";
 
 export interface PositionState {
 	readonly sizeBase: number;
@@ -98,8 +98,9 @@ export class PositionTracker {
 			const sizeDelta = serverSize - this.baseSize;
 
 			if (Math.abs(sizeDelta) > 0.0001) {
+				const d = FMT_DECIMALS;
 				log.warn(
-					`Position drift detected: local=${this.baseSize.toFixed(6)}, server=${serverSize.toFixed(6)}, delta=${sizeDelta.toFixed(6)}`,
+					`Position drift detected: local=${this.baseSize.toFixed(d.BALANCE)}, server=${serverSize.toFixed(d.BALANCE)}, delta=${sizeDelta.toFixed(d.BALANCE)}`,
 				);
 
 				// Process as a synthetic fill so PnL tracking stays correct
@@ -123,7 +124,7 @@ export class PositionTracker {
 						this.realizedPnL,
 					);
 					log.warn(
-						`Missed fill recovered via sync: ${fillSide} ${fillSize.toFixed(6)} @ ~$${approxPrice.toFixed(2)} (approx)`,
+						`Missed fill recovered via sync: ${fillSide} ${fillSize.toFixed(d.BALANCE)} @ ~$${approxPrice.toFixed(d.PRICE)} (approx)`,
 					);
 				} else {
 					// No price available — force-correct position without PnL
@@ -196,8 +197,9 @@ export class PositionTracker {
 
 		this.baseSize = previousBase + size * fillSign;
 
+		const d = FMT_DECIMALS;
 		log.debug(
-			`Position updated: ${this.baseSize.toFixed(6)} (${side} ${size} @ $${price.toFixed(2)}) | entry=$${this.avgEntryPrice.toFixed(2)} | rPnL=$${this.realizedPnL.toFixed(4)}`,
+			`Position updated: ${this.baseSize.toFixed(d.BALANCE)} (${side} ${size} @ $${price.toFixed(d.PRICE)}) | entry=$${this.avgEntryPrice.toFixed(d.PRICE)} | rPnL=$${this.realizedPnL.toFixed(d.PNL)}`,
 		);
 
 		return fillRealizedPnL;

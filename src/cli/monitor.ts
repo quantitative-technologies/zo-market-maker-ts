@@ -11,7 +11,7 @@ import {
 	type FairPriceConfig,
 } from "../pricing/fair-price.js";
 import { ZoOrderbookStream } from "../sdk/orderbook.js";
-import { log } from "../utils/logger.js";
+import { FMT_DECIMALS, log } from "../utils/logger.js";
 
 const FAIR_PRICE_WINDOW_MS = 5 * 60 * 1000;
 const FAIR_PRICE_MIN_SAMPLES = 10;
@@ -407,7 +407,7 @@ class MarketMonitor {
 		// Binance
 		if (this.binancePrice) {
 			const price = this.formatPrice(this.binancePrice.mid);
-			const rate = `${this.getUpdatesPerSecond(this.binanceUpdates).toFixed(1)}/s`;
+			const rate = `${this.getUpdatesPerSecond(this.binanceUpdates).toFixed(FMT_DECIMALS.BPS)}/s`;
 			lines.push(` Binance $${price} {gray-fg}${rate}{/gray-fg}`);
 		} else {
 			lines.push(` Binance {yellow-fg}--{/yellow-fg}`);
@@ -416,7 +416,7 @@ class MarketMonitor {
 		// 01 Exchange
 		if (this.zoPrice) {
 			const price = this.formatPrice(this.zoPrice.mid);
-			const rate = `${this.getUpdatesPerSecond(this.zoUpdates).toFixed(1)}/s`;
+			const rate = `${this.getUpdatesPerSecond(this.zoUpdates).toFixed(FMT_DECIMALS.BPS)}/s`;
 			lines.push(` 01      $${price} {gray-fg}${rate}{/gray-fg}`);
 		} else {
 			lines.push(` 01      {yellow-fg}--{/yellow-fg}`);
@@ -425,7 +425,7 @@ class MarketMonitor {
 		// Current offset (01 - Binance)
 		if (this.binancePrice && this.zoPrice) {
 			const offset = this.zoPrice.mid - this.binancePrice.mid;
-			const offsetBps = ((offset / this.binancePrice.mid) * 10000).toFixed(1);
+			const offsetBps = ((offset / this.binancePrice.mid) * 10000).toFixed(FMT_DECIMALS.BPS);
 			const sign = offset >= 0 ? "+" : "";
 			lines.push(` Offset  ${sign}${offsetBps}bps`);
 		}
@@ -436,7 +436,7 @@ class MarketMonitor {
 			const medianBps = (
 				(state.offset / this.binancePrice.mid) *
 				10000
-			).toFixed(1);
+			).toFixed(FMT_DECIMALS.BPS);
 			const sign = state.offset >= 0 ? "+" : "";
 			lines.push(
 				` Median  ${sign}${medianBps}bps {gray-fg}(${state.samples}s){/gray-fg}`,
@@ -480,7 +480,7 @@ class MarketMonitor {
 		const bestAsk = sortedAsks[0]?.price ?? 0;
 		const spread = bestAsk - bestBid;
 		const spreadBps =
-			bestBid > 0 ? ((spread / bestBid) * 10000).toFixed(1) : "0.0";
+			bestBid > 0 ? ((spread / bestBid) * 10000).toFixed(FMT_DECIMALS.BPS) : "0.0";
 		lines.push(
 			`  ─── spread: ${this.formatPrice(spread)} (${spreadBps} bps) ───`,
 		);

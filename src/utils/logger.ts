@@ -6,6 +6,14 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Logger } from "tslog";
 
+// Display precision constants for toFixed() — used across all formatting
+export const FMT_DECIMALS = {
+	BALANCE: 6,   // Balance amounts, base sizes ($104.655168, 0.001234)
+	PNL: 4,       // PnL values (+$0.0012)
+	PRICE: 2,     // USD prices ($100.00)
+	BPS: 1,       // Basis points, rates, milliseconds (3.5bps, 12.3ms)
+} as const;
+
 type LogOutput = (message: string) => void;
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -151,10 +159,11 @@ export const log = {
 		spreadBps: number,
 		mode: "normal" | "close",
 	): void {
-		const bidStr = bid !== null ? `$${bid.toFixed(2)}` : "--";
-		const askStr = ask !== null ? `$${ask.toFixed(2)}` : "--";
+		const d = FMT_DECIMALS;
+		const bidStr = bid !== null ? `$${bid.toFixed(d.PRICE)}` : "--";
+		const askStr = ask !== null ? `$${ask.toFixed(d.PRICE)}` : "--";
 		this.info(
-			`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(2)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}`,
+			`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(d.PRICE)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}`,
 		);
 	},
 
@@ -166,19 +175,20 @@ export const log = {
 		avgEntryPrice?: number,
 		unrealizedPnL?: number,
 	): void {
+		const d = FMT_DECIMALS;
 		const dir = isLong ? "LONG" : "SHORT";
 		const mode = isCloseMode ? " [CLOSE MODE]" : "";
 		let extra = "";
 		if (avgEntryPrice && avgEntryPrice > 0) {
-			extra += ` entry=$${avgEntryPrice.toFixed(2)}`;
+			extra += ` entry=$${avgEntryPrice.toFixed(d.PRICE)}`;
 		}
 		if (unrealizedPnL !== undefined && sizeBase !== 0) {
 			const sign = unrealizedPnL >= 0 ? "+" : "";
-			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(4)}`;
+			extra += ` | uPnL ${sign}$${unrealizedPnL.toFixed(d.PNL)}`;
 		}
-		this.info(
-			`POS: ${dir} ${Math.abs(sizeBase).toFixed(6)} ($${Math.abs(sizeUsd).toFixed(2)})${extra}${mode}`,
-		);
+		const msg = `POS: ${dir} ${Math.abs(sizeBase).toFixed(d.BALANCE)} ($${Math.abs(sizeUsd).toFixed(d.PRICE)})${extra}${mode}`;
+		this.info(msg);
+		this.fileLog("position", msg);
 	},
 
 	fill(
@@ -188,18 +198,19 @@ export const log = {
 		fillPnL?: number,
 		cumulativeRealizedPnL?: number,
 	): void {
+		const d = FMT_DECIMALS;
 		let pnlStr = "";
 		if (fillPnL !== undefined && fillPnL !== 0) {
 			const sign = fillPnL >= 0 ? "+" : "";
-			pnlStr += ` | fillPnL ${sign}$${fillPnL.toFixed(4)}`;
+			pnlStr += ` | fillPnL ${sign}$${fillPnL.toFixed(d.PNL)}`;
 		}
 		if (cumulativeRealizedPnL !== undefined) {
 			const sign = cumulativeRealizedPnL >= 0 ? "+" : "";
-			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(4)}`;
+			pnlStr += ` | rPnL ${sign}$${cumulativeRealizedPnL.toFixed(d.PNL)}`;
 		}
-		this.info(
-			`FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(2)}${pnlStr}`,
-		);
+		const msg = `FILL: ${side.toUpperCase()} ${size} @ $${price.toFixed(d.PRICE)}${pnlStr}`;
+		this.info(msg);
+		this.fileLog("position", msg);
 	},
 
 	banner(): void {
@@ -235,19 +246,46 @@ export const log = {
 		netPnL: number;
 		avgSpreadCapturedBps: number;
 	}): void {
-		const uptimeMin = (summary.uptimeMs / 60000).toFixed(1);
+		const d = FMT_DECIMALS;
+		const uptimeMin = (summary.uptimeMs / 60000).toFixed(d.BPS);
 		const fmt = (v: number) => {
 			const sign = v >= 0 ? "+" : "";
-			return `${sign}$${v.toFixed(4)}`;
+			return `${sign}$${v.toFixed(d.PNL)}`;
 		};
+		const line = `SESSION: uptime=${uptimeMin}min fills=${summary.fillCount} vol=$${summary.totalVolumeUsd.toFixed(d.PRICE)} rPnL=${fmt(summary.realizedPnL)} uPnL=${fmt(summary.unrealizedPnL)} net=${fmt(summary.netPnL)} spread=${summary.avgSpreadCapturedBps.toFixed(d.PRICE)}bps`;
+		this.fileLog("position", line);
 		this.info("═══ SESSION SUMMARY ═══");
 		this.info(`  Uptime:     ${uptimeMin} min`);
 		this.info(`  Fills:      ${summary.fillCount}`);
-		this.info(`  Volume:     $${summary.totalVolumeUsd.toFixed(2)}`);
+		this.info(`  Volume:     $${summary.totalVolumeUsd.toFixed(d.PRICE)}`);
 		this.info(`  Realized:   ${fmt(summary.realizedPnL)}`);
 		this.info(`  Unrealized: ${fmt(summary.unrealizedPnL)}`);
 		this.info(`  Net PnL:    ${fmt(summary.netPnL)}`);
-		this.info(`  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(2)} bps`);
+		this.info(`  Avg Spread: ${summary.avgSpreadCapturedBps.toFixed(d.PRICE)} bps`);
+		this.info("═══════════════════════");
+	},
+
+	balanceSummary(summary: {
+		startingBalance: number;
+		currentBalance: number;
+		totalFunding: number;
+		totalNetTrading: number;
+		totalFees: number;
+		netChange: number;
+		syncCount: number;
+	}): void {
+		const d = FMT_DECIMALS;
+		const fmt = (v: number) => {
+			const sign = v >= 0 ? "+" : "";
+			return `${sign}$${v.toFixed(d.BALANCE)}`;
+		};
+		this.info("═══ BALANCE SUMMARY ═══");
+		this.info(`  Starting:   $${summary.startingBalance.toFixed(d.BALANCE)}`);
+		this.info(`  Current:    $${summary.currentBalance.toFixed(d.BALANCE)}`);
+		this.info(`  Net Change: ${fmt(summary.netChange)}`);
+		this.info(`  Funding:    ${fmt(summary.totalFunding)}`);
+		this.info(`  Est. Fees:  ${fmt(summary.totalFees)}`);
+		this.info(`  Syncs:      ${summary.syncCount}`);
 		this.info("═══════════════════════");
 	},
 
