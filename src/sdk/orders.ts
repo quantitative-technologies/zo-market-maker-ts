@@ -224,6 +224,7 @@ export async function closePosition(
 	baseSize: number,
 	price: string,
 ): Promise<void> {
+	// TODO: use Decimal for position sizes to eliminate floating point epsilon
 	if (Math.abs(baseSize) < 1e-10) return;
 
 	// If long, sell to close. If short, buy to close.

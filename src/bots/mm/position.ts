@@ -311,6 +311,7 @@ export class PositionTracker {
 				this.avgEntryPrice = price;
 			} else if (Math.abs(previousBase + size * fillSign) < 1e-10) {
 				// Fully closed
+				// TODO: use Decimal for position accumulation to eliminate floating point epsilon
 				this.avgEntryPrice = 0;
 			}
 			// Partially reduced: avgEntryPrice stays the same
