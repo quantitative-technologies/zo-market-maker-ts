@@ -12,6 +12,7 @@ export interface MarketMakerConfig {
   readonly takeProfitBps: number // Spread in close mode (bps)
   readonly orderSizeUsd: number // Order size in USD
   readonly closeThresholdUsd: number // Trigger close mode when position >= this
+  readonly closeSlippageBps: number // Slippage tolerance for IOC close order (bps)
   readonly warmupSeconds: number // Seconds to warm up before quoting
 
   // Operational parameters
@@ -33,6 +34,7 @@ const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol'>> = {
   take_profit_bps: 'takeProfitBps',
   order_size_usd: 'orderSizeUsd',
   close_threshold_usd: 'closeThresholdUsd',
+  close_slippage_bps: 'closeSlippageBps',
   warmup_seconds: 'warmupSeconds',
   // Operational
   update_throttle_ms: 'updateThrottleMs',

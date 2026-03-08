@@ -413,22 +413,46 @@ export class MarketMaker {
 			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
 		}
 
-		// Close open position — independent of order cancellation
+		// Close WebSocket feed before position close to prevent stale partial updates
+		this.accountStream?.close();
+
+		// Reconcile with exchange to capture any missed in-flight fills
+		try {
+			if (this.positionTracker && this.client) {
+				await this.positionTracker.reconcileWithExchange(this.client.user);
+			}
+		} catch (err) {
+			log.error("SHUTDOWN: pre-close reconciliation failed:", err);
+		}
+
+		// Close open position using reconciled state
 		try {
 			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
-			if (Math.abs(baseSize) > 1e-10 && this.client && markPrice > 0) {
+			const tracker = this.positionTracker;
+			const client = this.client;
+			if (baseSize !== 0 && tracker && client && markPrice > 0) {
 				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
-				const slippage = markPrice * 0.005;
+				const slippage = markPrice * this.config.closeSlippageBps / 10000;
 				const closePrice = baseSize > 0
 					? (markPrice - slippage).toFixed(this.priceDecimals)
 					: (markPrice + slippage).toFixed(this.priceDecimals);
 				await closePosition(
-					this.client.user,
+					client.user,
 					this.marketId,
 					baseSize,
 					closePrice,
 				);
-				log.info("SHUTDOWN: position closed");
+
+				// Reconcile again to capture actual close fill price via getTrades()
+				await tracker.reconcileWithExchange(client.user);
+
+				// Verify position is flat
+				const remainingSize = tracker.getBaseSize();
+				if (remainingSize !== 0) {
+					log.error(`SHUTDOWN: position NOT flat after close — remaining size: ${remainingSize}`);
+				} else {
+					log.info("SHUTDOWN: position closed and verified flat");
+				}
 			} else {
 				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, client: ${!!this.client}, mark: ${markPrice})`);
 			}
@@ -441,8 +465,7 @@ export class MarketMaker {
 			await this.balanceTracker.finalSync(this.client.user, this.client.accountId);
 		}
 
-		// Close feeds after cleanup (SDK may need connection for API calls)
-		this.accountStream?.close();
+		// Close remaining feeds
 		this.binanceFeed?.close();
 		this.orderbookStream?.close();
 
