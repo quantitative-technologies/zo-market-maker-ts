@@ -2,6 +2,10 @@
 
 import { FMT_DECIMALS, log } from "../../utils/logger.js";
 
+// Floating point epsilon for position size zero-comparison.
+// Workaround until position sizes migrate to Decimal (see TODO-decimal-migration.md).
+export const POSITION_EPSILON = 1e-10;
+
 export interface PositionState {
 	readonly sizeBase: number;
 	readonly sizeUsd: number;
@@ -188,7 +192,7 @@ export class PositionTracker {
 			if (remainingSize > 0) {
 				// Flipped: remainder opens new position at fill price
 				this.avgEntryPrice = price;
-			} else if (Math.abs(previousBase + size * fillSign) < 1e-10) {
+			} else if (Math.abs(previousBase + size * fillSign) < POSITION_EPSILON) {
 				// Fully closed
 				this.avgEntryPrice = 0;
 			}

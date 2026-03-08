@@ -14,7 +14,7 @@ import type { CachedOrder, FillEvent, MidPrice } from "../../types.js";
 import { FMT_DECIMALS, log } from "../../utils/logger.js";
 import type { MarketMakerConfig } from "./config.js";
 import { type BalanceConfig, BalanceTracker } from "./balance.js";
-import { type PositionConfig, PositionTracker } from "./position.js";
+import { POSITION_EPSILON, type PositionConfig, PositionTracker } from "./position.js";
 import { Quoter } from "./quoter.js";
 
 export type { MarketMakerConfig } from "./config.js";
@@ -330,17 +330,40 @@ export class MarketMaker {
 			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
 		}
 
-		// Close open position
+		// Reconcile position with exchange before close
 		try {
-			const baseSize = this.positionTracker?.getBaseSize() ?? 0;
-			if (Math.abs(baseSize) > 1e-10 && markPrice > 0) {
+			const { baseSize } = await this.adapter.fetchPosition();
+			if (this.positionTracker) {
+				const localSize = this.positionTracker.getBaseSize();
+				if (Math.abs(baseSize - localSize) > POSITION_EPSILON) {
+					log.warn(`SHUTDOWN: position reconciled — local=${localSize}, exchange=${baseSize}`);
+				}
+			}
+		} catch (err) {
+			log.error("SHUTDOWN: pre-close reconciliation failed:", err);
+		}
+
+		// Close open position using reconciled state
+		try {
+			const { baseSize: rawSize } = await this.adapter.fetchPosition();
+			const factor = 10 ** this.sizeDecimals;
+			const baseSize = Math.round(rawSize * factor) / factor;
+			if (baseSize !== 0 && markPrice > 0) {
 				log.info(`SHUTDOWN: closing position ${baseSize} @ mark ${markPrice}...`);
-				const slippage = markPrice * 0.005;
+				const slippage = markPrice * this.config.closeSlippageBps / 10000;
 				const closePrice = baseSize > 0
 					? (markPrice - slippage).toFixed(this.priceDecimals)
 					: (markPrice + slippage).toFixed(this.priceDecimals);
 				await this.adapter.closePosition(baseSize, closePrice);
-				log.info("SHUTDOWN: position closed");
+
+				// Verify position is flat
+				const { baseSize: remaining } = await this.adapter.fetchPosition();
+				const roundedRemaining = Math.round(remaining * factor) / factor;
+				if (roundedRemaining !== 0) {
+					log.error(`SHUTDOWN: position NOT flat after close — remaining size: ${roundedRemaining}`);
+				} else {
+					log.info("SHUTDOWN: position closed and verified flat");
+				}
 			} else {
 				log.info(`SHUTDOWN: no position to close (size: ${baseSize}, mark: ${markPrice})`);
 			}

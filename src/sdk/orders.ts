@@ -10,6 +10,7 @@ import Decimal from "decimal.js";
 import type { Quote } from "../types.js";
 import { diffOrders } from "../orders.js";
 import { log } from "../utils/logger.js";
+import { POSITION_EPSILON } from "../bots/mm/position.js";
 
 const MAX_ATOMIC_ACTIONS = 4;
 
@@ -206,7 +207,7 @@ export async function closePosition(
 	baseSize: number,
 	price: string,
 ): Promise<void> {
-	if (Math.abs(baseSize) < 1e-10) return;
+	if (Math.abs(baseSize) < POSITION_EPSILON) return;
 
 	// If long, sell to close. If short, buy to close.
 	const side = baseSize > 0 ? Side.Ask : Side.Bid;
