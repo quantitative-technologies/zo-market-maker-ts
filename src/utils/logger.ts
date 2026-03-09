@@ -279,10 +279,13 @@ export const log = {
 	balanceSummary(summary: {
 		startingBalance: number;
 		currentBalance: number;
+		startingEquity: number;
+		currentEquity: number;
 		totalFunding: number;
 		totalNetTrading: number;
 		totalFees: number;
 		netChange: number;
+		equityChange: number;
 		syncCount: number;
 	}): void {
 		const d = FMT_DECIMALS;
@@ -291,9 +294,10 @@ export const log = {
 			return `${sign}$${v.toFixed(d.QUOTE)}`;
 		};
 		this.info("═══ BALANCE SUMMARY ═══");
-		this.info(`  Starting:   $${summary.startingBalance.toFixed(d.QUOTE)}`);
-		this.info(`  Current:    $${summary.currentBalance.toFixed(d.QUOTE)}`);
-		this.info(`  Net Change: ${fmt(summary.netChange)}`);
+		this.info(`  Start Eq:   $${summary.startingEquity.toFixed(d.QUOTE)}`);
+		this.info(`  Curr Eq:    $${summary.currentEquity.toFixed(d.QUOTE)}`);
+		this.info(`  Eq Change:  ${fmt(summary.equityChange)}`);
+		this.info(`  Balance:    ${fmt(summary.netChange)} ($${summary.currentBalance.toFixed(d.QUOTE)})`);
 		this.info(`  Funding:    ${fmt(summary.totalFunding)}`);
 		this.info(`  Est. Fees:  ${fmt(summary.totalFees)}`);
 		this.info(`  Syncs:      ${summary.syncCount}`);

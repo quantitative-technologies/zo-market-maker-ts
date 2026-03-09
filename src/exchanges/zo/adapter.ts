@@ -228,14 +228,16 @@ export class ZoAdapter implements ExchangeAdapter {
 		const balance = balanceEntries.length > 0 ? balanceEntries[0].balance : 0;
 
 		const fundingPnlByMarket = new Map<number, number>();
+		const unrealizedPnlByMarket = new Map<number, number>();
 		const positions = user.positions[accountId] ?? [];
 		for (const pos of positions) {
 			if (pos.perp) {
 				fundingPnlByMarket.set(pos.marketId, pos.perp.fundingPaymentPnl);
+				unrealizedPnlByMarket.set(pos.marketId, pos.perp.sizePricePnl);
 			}
 		}
 
-		return { balance, fundingPnlByMarket };
+		return { balance, fundingPnlByMarket, unrealizedPnlByMarket };
 	}
 
 	async fetchFeeRates(): Promise<FeeRateInfo> {

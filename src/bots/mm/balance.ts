@@ -1,4 +1,4 @@
-// Balance tracker — logs starting balance, fee rates, and attributed balance changes
+// Balance & equity tracker — logs starting balance, fee rates, and attributed balance changes
 //
 // Empirically verified balance model (01 Exchange):
 //   While position is open: Δbalance = realizedPnL - fees
@@ -8,6 +8,9 @@
 //
 // Therefore: netTrading = Δbalance (includes realized PnL, fees, and funding on close)
 // Funding is tracked separately for reporting only.
+//
+// Equity = balance + unrealizedPnl (from exchange's sizePricePnl).
+// Equity changes are logged on every sync where equity moves.
 
 import type { BalanceSnapshot, FeeRateInfo } from "../../exchanges/adapter.js";
 import { FMT_DECIMALS, log } from "../../utils/logger.js";
@@ -21,10 +24,13 @@ export interface BalanceConfig {
 export interface BalanceSummary {
 	readonly startingBalance: number;
 	readonly currentBalance: number;
+	readonly startingEquity: number;
+	readonly currentEquity: number;
 	readonly totalFunding: number;
 	readonly totalNetTrading: number;
 	readonly totalFees: number;
 	readonly netChange: number;
+	readonly equityChange: number;
 	readonly syncCount: number;
 }
 
@@ -32,6 +38,8 @@ export class BalanceTracker {
 	private isRunning = false;
 	private startingBalance = 0;
 	private currentBalance = 0;
+	private startingEquity = 0;
+	private currentUnrealizedPnl = 0;
 	private previousSnapshot: BalanceSnapshot | null = null;
 	private feeRate: FeeRateInfo | null = null;
 	private pendingFeeAccumulator = 0;
@@ -56,12 +64,14 @@ export class BalanceTracker {
 		const d = FMT_DECIMALS;
 		this.startingBalance = snapshot.balance;
 		this.currentBalance = this.startingBalance;
+		this.currentUnrealizedPnl = sumMapValues(snapshot.unrealizedPnlByMarket);
+		this.startingEquity = this.startingBalance + this.currentUnrealizedPnl;
 		log.fileLog(
 			"balance",
-			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(d.QUOTE)}`,
+			`BALANCE_INIT: balance=$${this.startingBalance.toFixed(d.QUOTE)} equity=$${this.startingEquity.toFixed(d.QUOTE)} uPnL=$${this.currentUnrealizedPnl.toFixed(d.QUOTE)}`,
 		);
 		log.info(
-			`BALANCE: starting balance $${this.startingBalance.toFixed(d.QUOTE)}`,
+			`BALANCE: starting equity $${this.startingEquity.toFixed(d.QUOTE)} (balance $${this.startingBalance.toFixed(d.QUOTE)}, uPnL $${this.currentUnrealizedPnl.toFixed(d.QUOTE)})`,
 		);
 
 		// Fetch fee rates
@@ -115,13 +125,17 @@ export class BalanceTracker {
 	}
 
 	getSessionSummary(): BalanceSummary {
+		const currentEquity = this.currentBalance + this.currentUnrealizedPnl;
 		return {
 			startingBalance: this.startingBalance,
 			currentBalance: this.currentBalance,
+			startingEquity: this.startingEquity,
+			currentEquity,
 			totalFunding: this.totalFunding,
 			totalNetTrading: this.totalNetTrading,
 			totalFees: this.totalFees,
 			netChange: this.currentBalance - this.startingBalance,
+			equityChange: currentEquity - this.startingEquity,
 			syncCount: this.syncCount,
 		};
 	}
@@ -142,6 +156,7 @@ export class BalanceTracker {
 		try {
 			const newSnapshot = await fetchSnapshot();
 			this.currentBalance = newSnapshot.balance;
+			this.currentUnrealizedPnl = sumMapValues(newSnapshot.unrealizedPnlByMarket);
 			this.syncCount++;
 
 			if (this.previousSnapshot) {
@@ -184,10 +199,16 @@ export class BalanceTracker {
 					return `${sign}$${v.toFixed(d.QUOTE)}`;
 				};
 
-				if (balanceChange !== 0) {
+				const currentEquity = this.currentBalance + this.currentUnrealizedPnl;
+				const previousEquity =
+					this.previousSnapshot.balance +
+					sumMapValues(this.previousSnapshot.unrealizedPnlByMarket);
+				const equityChange = currentEquity - previousEquity;
+
+				if (equityChange !== 0) {
 					log.fileLog(
 						"balance",
-						`BALANCE_SYNC: bal=$${newSnapshot.balance.toFixed(d.QUOTE)} | delta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | estFees=${fmt(feesDelta)}`,
+						`EQUITY_SYNC: equity=$${currentEquity.toFixed(d.QUOTE)} | bal=$${newSnapshot.balance.toFixed(d.QUOTE)} | uPnL=$${this.currentUnrealizedPnl.toFixed(d.QUOTE)} | eqDelta=${fmt(equityChange)} | balDelta=${fmt(balanceChange)} | funding=${fmt(fundingDelta)} | estFees=${fmt(feesDelta)}`,
 					);
 				}
 			}
@@ -213,4 +234,12 @@ export class BalanceTracker {
 	private sleep(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
+}
+
+function sumMapValues(map: Map<number, number>): number {
+	let total = 0;
+	for (const v of map.values()) {
+		total += v;
+	}
+	return total;
 }
