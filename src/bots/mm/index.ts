@@ -79,10 +79,15 @@ export class MarketMaker {
 	private lastT2T = 0;
 	private t2tSamples: number[] = [];
 
+	private readonly closePositionOnStart: boolean;
+
 	constructor(
 		private readonly config: MarketMakerConfig,
 		private readonly adapter: ExchangeAdapter,
-	) {}
+		options?: { closePosition?: boolean },
+	) {
+		this.closePositionOnStart = options?.closePosition ?? false;
+	}
 
 	async run(): Promise<void> {
 		log.banner();
@@ -284,6 +289,11 @@ export class MarketMaker {
 			this.positionTracker.setFeeRates(feeRate.makerFeePpm, feeRate.takerFeePpm);
 		}
 
+		// Close existing position before starting if requested
+		if (this.closePositionOnStart) {
+			await this.closeExistingPosition();
+		}
+
 		// Start position sync with trade recovery support
 		this.positionTracker?.startSync(
 			() => this.adapter.fetchPosition(),
@@ -309,6 +319,39 @@ export class MarketMaker {
 		const shutdown = () => this.shutdown();
 		process.on("SIGINT", shutdown);
 		process.on("SIGTERM", shutdown);
+	}
+
+	private async closeExistingPosition(): Promise<void> {
+		const { baseSize: rawSize } = await this.adapter.fetchPosition();
+		const factor = 10 ** this.sizeDecimals;
+		const baseSize = Math.round(rawSize * factor) / factor;
+
+		if (baseSize === 0) {
+			log.info("STARTUP: no existing position to close");
+			return;
+		}
+
+		const mid = this.adapter.getMidPrice();
+		if (!mid) {
+			throw new Error("STARTUP: cannot close position — no mid price available from orderbook");
+		}
+
+		const markPrice = mid.mid;
+		const slippage = markPrice * this.config.closeSlippageBps / 10000;
+		const closePrice = baseSize > 0
+			? (markPrice - slippage).toFixed(this.priceDecimals)
+			: (markPrice + slippage).toFixed(this.priceDecimals);
+
+		log.info(`STARTUP: closing existing position ${baseSize} @ mid ${markPrice} (limit ${closePrice})...`);
+		await this.adapter.closePosition(baseSize, closePrice);
+
+		// Verify position is flat
+		const { baseSize: remaining } = await this.adapter.fetchPosition();
+		const roundedRemaining = Math.round(remaining * factor) / factor;
+		if (roundedRemaining !== 0) {
+			throw new Error(`STARTUP: position NOT flat after close — remaining size: ${roundedRemaining}`);
+		}
+		log.info("STARTUP: existing position closed and verified flat");
 	}
 
 	private async shutdown(): Promise<void> {
