@@ -33,6 +33,9 @@ bench:
 start-%:
 	docker compose up -d --build mm-$*
 
+close-start-%:
+	docker compose run -d --build mm-$* $$(echo $* | tr 'a-z' 'A-Z') --close-position
+
 stop-%:
 	docker compose stop mm-$*
 
