@@ -247,20 +247,25 @@ export class ZoOrderbookStream {
 	}
 
 	private async reconnect(): Promise<void> {
-		// Reset state
-		this.resetState();
+		try {
+			// Reset state
+			this.resetState();
 
-		// 1. Subscribe to WebSocket FIRST (buffer messages)
-		this.subscription = this.nord.subscribeOrderbook(this.symbol);
-		this.setupEventHandlers();
+			// 1. Subscribe to WebSocket FIRST (buffer messages)
+			this.subscription = this.nord.subscribeOrderbook(this.symbol);
+			this.setupEventHandlers();
 
-		// 2. Fetch fresh snapshot
-		await this.fetchSnapshot();
+			// 2. Fetch fresh snapshot
+			await this.fetchSnapshot();
 
-		// 3. Apply buffered deltas
-		this.applyBufferedDeltas();
+			// 3. Apply buffered deltas
+			this.applyBufferedDeltas();
 
-		log.info("Zo orderbook reconnected");
+			log.info("Zo orderbook reconnected");
+		} catch (err) {
+			log.error("Orderbook reconnect failed:", err);
+			this.scheduleReconnect();
+		}
 	}
 
 	private resetState(): void {
