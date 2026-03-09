@@ -1,4 +1,4 @@
-.PHONY: build start stop restart logs ps clean clean-logs bench
+.PHONY: build start stop restart logs ps clean cleanall clean-logs bench
 
 build:
 	docker compose build
@@ -22,6 +22,10 @@ ps:
 clean:
 	docker compose down --rmi local
 
+cleanall:
+	docker compose down --rmi local
+	rm -f logs/*.log
+
 clean-logs:
 	rm -f logs/*.log
 
@@ -34,7 +38,10 @@ start-%:
 	docker compose up -d --build mm-$*
 
 close-start-%:
-	docker compose run -d --build mm-$* $$(echo $* | tr 'a-z' 'A-Z') --close-position
+	MM_ARGS=--close-position docker compose up -d --build mm-$*
+
+clean-%:
+	docker compose rm -sf mm-$*
 
 stop-%:
 	docker compose stop mm-$*
