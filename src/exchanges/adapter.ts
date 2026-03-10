@@ -6,7 +6,9 @@ import type {
 	FillCallback,
 	MarketInfo,
 	MidPrice,
+	OrderbookUpdateCallback,
 	PriceCallback,
+	PublicTradeCallback,
 	Quote,
 } from "../types.js";
 
@@ -40,6 +42,8 @@ export interface ExchangeAdapter {
 	// Data feeds — adapter calls these callbacks when data arrives
 	onFill: FillCallback | null;
 	onPrice: PriceCallback | null;
+	onOrderbookUpdate: OrderbookUpdateCallback | null;
+	onTrade: PublicTradeCallback | null;
 
 	// Orders
 	syncOrders(): Promise<CachedOrder[]>;

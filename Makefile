@@ -53,8 +53,11 @@ restart-%:
 logs-%:
 	docker compose logs -f mm-$*
 
-monitor-%:
-	npm run monitor -- $*
+monitor-zo-%:
+	npm run monitor -- zo $*
+
+monitor-hl-%:
+	npm run monitor -- hyperliquid $*
 
 position-log-%:
 	tail -f logs/$$(echo $* | tr A-Z a-z)*-position.log

@@ -13,6 +13,7 @@ import {
 import { HyperliquidAccountStream } from "./account.js";
 import { HyperliquidOrderbookStream } from "./orderbook.js";
 import { floatToWire } from "./signing.js";
+import { HyperliquidTradeStream } from "./trades.js";
 import type {
 	BBO,
 	CachedOrder,
@@ -20,7 +21,9 @@ import type {
 	FillEvent,
 	MarketInfo,
 	MidPrice,
+	OrderbookUpdateCallback,
 	PriceCallback,
+	PublicTradeCallback,
 	Quote,
 } from "../../types.js";
 import { log } from "../../utils/logger.js";
@@ -42,12 +45,15 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 
 	onFill: FillCallback | null = null;
 	onPrice: PriceCallback | null = null;
+	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
+	onTrade: PublicTradeCallback | null = null;
 
 	private client: HyperliquidClient | null = null;
 	private assetIndex = -1;
 	private szDecimals = 0;
 	private accountStream: HyperliquidAccountStream | null = null;
 	private orderbookStream: HyperliquidOrderbookStream | null = null;
+	private tradeStream: HyperliquidTradeStream | null = null;
 
 	constructor(
 		private readonly privateKey: string,
@@ -92,6 +98,17 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		this.orderbookStream.onPrice = (price: MidPrice) => {
 			this.onPrice?.(price);
 		};
+		this.orderbookStream.onOrderbookUpdate = (bids, asks) => {
+			this.onOrderbookUpdate?.(bids, asks);
+		};
+
+		this.tradeStream = new HyperliquidTradeStream(
+			this.adapterConfig.symbol,
+			this.adapterConfig.reconnectDelayMs,
+		);
+		this.tradeStream.onTrade = (trades) => {
+			this.onTrade?.(trades);
+		};
 
 		this.accountStream = new HyperliquidAccountStream(
 			this.client.walletAddress,
@@ -106,6 +123,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 
 		// Start connections
 		this.accountStream.connect();
+		this.tradeStream.connect();
 		await this.orderbookStream.connect();
 
 		return {
@@ -119,6 +137,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 	async close(): Promise<void> {
 		this.accountStream?.close();
 		this.orderbookStream?.close();
+		this.tradeStream?.close();
 	}
 
 	async syncOrders(): Promise<CachedOrder[]> {

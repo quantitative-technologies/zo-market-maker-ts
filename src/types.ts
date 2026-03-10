@@ -45,6 +45,22 @@ export interface CachedOrder {
 	size: Decimal;
 }
 
+// Orderbook depth update (price → size per side)
+export type OrderbookUpdateCallback = (
+	bids: Map<number, number>,
+	asks: Map<number, number>,
+) => void;
+
+// Public trade from exchange trade stream
+export interface PublicTrade {
+	time: number;
+	side: "buy" | "sell";
+	price: number;
+	size: number;
+}
+
+export type PublicTradeCallback = (trades: PublicTrade[]) => void;
+
 // Market metadata returned by exchange adapter on connect
 export interface MarketInfo {
 	symbol: string;

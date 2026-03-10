@@ -17,7 +17,10 @@ import type {
 	FillEvent,
 	MarketInfo,
 	MidPrice,
+	OrderbookUpdateCallback,
 	PriceCallback,
+	PublicTrade,
+	PublicTradeCallback,
 	Quote,
 } from "../../types.js";
 
@@ -52,12 +55,15 @@ export class ZoAdapter implements ExchangeAdapter {
 
 	onFill: FillCallback | null = null;
 	onPrice: PriceCallback | null = null;
+	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
+	onTrade: PublicTradeCallback | null = null;
 
 	private client: ZoClient | null = null;
 	private marketId = 0;
 	private sizeDecimals = 0;
 	private accountStream: AccountStream | null = null;
 	private orderbookStream: ZoOrderbookStream | null = null;
+	private tradeSubscription: ReturnType<typeof import("@n1xyz/nord-ts").Nord.prototype.subscribeTrades> | null = null;
 
 	constructor(
 		private readonly privateKey: string,
@@ -117,6 +123,23 @@ export class ZoAdapter implements ExchangeAdapter {
 		this.orderbookStream.onPrice = (price: MidPrice) => {
 			this.onPrice?.(price);
 		};
+		this.orderbookStream.onOrderbookUpdate = (bids, asks) => {
+			this.onOrderbookUpdate?.(bids, asks);
+		};
+
+		// Subscribe to public trades
+		this.tradeSubscription = nord.subscribeTrades(market.symbol);
+		this.tradeSubscription.on("message", (data: unknown) => {
+			const msg = data as { trades?: Array<{ side: string; price: number; size: number }> };
+			if (!msg.trades) return;
+			const trades: PublicTrade[] = msg.trades.map((t) => ({
+				time: Date.now(),
+				side: t.side === "ask" ? "buy" as const : "sell" as const,
+				price: t.price,
+				size: t.size,
+			}));
+			this.onTrade?.(trades);
+		});
 
 		// Start connections
 		this.accountStream.connect();
@@ -133,6 +156,7 @@ export class ZoAdapter implements ExchangeAdapter {
 	async close(): Promise<void> {
 		this.accountStream?.close();
 		this.orderbookStream?.close();
+		this.tradeSubscription?.close();
 	}
 
 	async syncOrders(): Promise<CachedOrder[]> {

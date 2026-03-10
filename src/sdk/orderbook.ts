@@ -3,19 +3,12 @@ import type {
 	OrderbookEntry,
 	WebSocketDeltaUpdate,
 } from "@n1xyz/nord-ts";
-import type { MidPrice, PriceCallback } from "../types.js";
+import type { MidPrice, OrderbookUpdateCallback, PriceCallback } from "../types.js";
 import { log } from "../utils/logger.js";
 
-
 // Re-export from shared types
-export type { BBO } from "../types.js";
+export type { BBO, OrderbookUpdateCallback } from "../types.js";
 import type { BBO } from "../types.js";
-
-// Callback for orderbook depth updates (for display)
-export type OrderbookUpdateCallback = (
-	bids: Map<number, number>,
-	asks: Map<number, number>,
-) => void;
 
 // Sorted orderbook side (price -> size)
 // Bids: descending (highest first), Asks: ascending (lowest first)

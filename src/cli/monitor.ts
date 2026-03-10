@@ -1,16 +1,15 @@
 // Unified Market Monitor CLI
-// Combines orderbook and pricing views using blessed TUI
+// Works with any exchange via MonitorFeed
 
 import "dotenv/config";
-import { Nord } from "@n1xyz/nord-ts";
-import { Connection } from "@solana/web3.js";
 import blessed from "blessed";
 import { BinancePriceFeed } from "../pricing/binance.js";
 import {
 	FairPriceCalculator,
 	type FairPriceConfig,
 } from "../pricing/fair-price.js";
-import { ZoOrderbookStream } from "../sdk/orderbook.js";
+import { createMonitorFeed, type MonitorFeed } from "../exchanges/monitor-feed.js";
+import type { PublicTrade } from "../types.js";
 import { FMT_DECIMALS, log } from "../utils/logger.js";
 
 const FAIR_PRICE_WINDOW_MS = 5 * 60 * 1000;
@@ -44,21 +43,20 @@ interface Trade {
 }
 
 class MarketMonitor {
-	private nord!: Nord;
+	private feed!: MonitorFeed;
 	private binanceFeed!: BinancePriceFeed;
-	private zoOrderbook!: ZoOrderbookStream;
 	private fairPriceCalc!: FairPriceCalculator;
 
 	private binancePrice: PriceState | null = null;
-	private zoPrice: PriceState | null = null;
+	private exchangePrice: PriceState | null = null;
 	private fairPrice: { price: number; timestamp: number } | null = null;
 
 	// Update frequency tracking
 	private binanceUpdates: number[] = [];
-	private zoUpdates: number[] = [];
+	private exchangeUpdates: number[] = [];
 	private fairPriceUpdates: number[] = [];
 
-	// Orderbook state (from WebSocket deltas for display)
+	// Orderbook state (from WebSocket for display)
 	private orderbookBids = new Map<number, number>();
 	private orderbookAsks = new Map<number, number>();
 
@@ -80,44 +78,60 @@ class MarketMonitor {
 	private sizeDecimals = 4;
 	private restoreConsole: (() => void) | null = null;
 
-	constructor(private readonly targetSymbol: string) {}
+	constructor(
+		private readonly exchangeName: string,
+		private readonly targetSymbol: string,
+	) {}
 
 	async run(): Promise<void> {
 		this.initScreen();
-		this.addLog("Connecting to 01 Exchange...");
+		this.addLog(`Connecting to ${this.exchangeName}...`);
 
-		const rpcUrl = process.env.RPC_URL || "https://api.mainnet-beta.solana.com";
-		const connection = new Connection(rpcUrl, "confirmed");
-
-		this.nord = await Nord.new({
-			webServerUrl: "https://zo-mainnet.n1.xyz",
-			app: "zoau54n5U24GHNKqyoziVaVxgsiQYnPMx33fKmLLCT5",
-			solanaConnection: connection,
+		this.feed = await createMonitorFeed({
+			exchange: this.exchangeName,
+			symbol: this.targetSymbol,
+			staleThresholdMs: STALE_THRESHOLD_MS,
+			staleCheckIntervalMs: STALE_CHECK_INTERVAL_MS,
+			reconnectDelayMs: RECONNECT_DELAY_MS,
+			maxBookLevels: MAX_BOOK_LEVELS,
 		});
 
-		// Find market
-		const market = this.nord.markets.find((m) =>
-			m.symbol.toUpperCase().startsWith(this.targetSymbol.toUpperCase()),
-		);
-		if (!market) {
-			const available = this.nord.markets.map((m) => m.symbol).join(", ");
-			this.addLog(
-				`Market "${this.targetSymbol}" not found. Available: ${available}`,
-			);
-			return;
-		}
+		// Wire feed callbacks before connect
+		this.feed.onPrice = (price) => {
+			this.exchangePrice = price;
+			this.recordUpdate(this.exchangeUpdates);
+			this.updateFairPrice();
+			this.render();
+		};
 
-		this.priceDecimals = market.priceDecimals;
-		this.sizeDecimals = market.sizeDecimals;
+		this.feed.onOrderbookUpdate = (bids, asks) => {
+			this.orderbookBids = new Map(bids);
+			this.orderbookAsks = new Map(asks);
+			this.scheduleRender();
+		};
+
+		this.feed.onTrade = (trades: PublicTrade[]) => {
+			for (const t of trades) {
+				this.recentTrades.unshift(t);
+			}
+			if (this.recentTrades.length > MAX_TRADES) {
+				this.recentTrades.length = MAX_TRADES;
+			}
+			this.scheduleRender();
+		};
+
+		const marketInfo = await this.feed.connect();
+		this.priceDecimals = marketInfo.priceDecimals;
+		this.sizeDecimals = marketInfo.sizeDecimals;
 
 		// Derive Binance symbol
-		const baseSymbol = market.symbol
+		const baseSymbol = marketInfo.symbol
 			.replace(/-PERP$/i, "")
 			.replace(/USD$/i, "")
 			.toLowerCase();
 		const binanceSymbol = `${baseSymbol}usdt`;
 
-		this.addLog(`Market: ${market.symbol}, Binance: ${binanceSymbol}`);
+		this.addLog(`Market: ${marketInfo.symbol}, Binance: ${binanceSymbol}`);
 
 		// Initialize fair price calculator
 		const fairPriceConfig: FairPriceConfig = {
@@ -135,38 +149,7 @@ class MarketMonitor {
 			this.render();
 		};
 
-		// Setup Zo orderbook stream (handles both pricing and depth display)
-		this.zoOrderbook = new ZoOrderbookStream(
-			this.nord,
-			market.symbol,
-			undefined,
-			STALE_THRESHOLD_MS,
-			STALE_CHECK_INTERVAL_MS,
-			RECONNECT_DELAY_MS,
-			MAX_BOOK_LEVELS,
-		);
-		this.zoOrderbook.onPrice = (price) => {
-			this.zoPrice = price;
-			this.recordUpdate(this.zoUpdates);
-			this.updateFairPrice();
-			this.render();
-		};
-
-		// Set up orderbook update handler for depth display
-		this.zoOrderbook.onOrderbookUpdate = (bids, asks) => {
-			this.handleOrderbookUpdate(bids, asks);
-		};
-
-		// Subscribe to trades
-		const tradesSub = this.nord.subscribeTrades(market.symbol);
-		tradesSub.on("message", (data: unknown) => {
-			this.handleTradesUpdate(data);
-		});
-
-		// Start connections
 		this.binanceFeed.connect();
-		await this.zoOrderbook.connect();
-
 		this.addLog("Connected! Press 'q' to quit.");
 
 		// Keep alive
@@ -176,7 +159,7 @@ class MarketMonitor {
 	private initScreen(): void {
 		this.screen = blessed.screen({
 			smartCSR: true,
-			title: "Zo Market Monitor",
+			title: "Market Monitor",
 		});
 
 		// Redirect all log output to the TUI log box
@@ -203,6 +186,8 @@ class MarketMonitor {
 			console.error = originalConsoleError;
 		};
 
+		const displayName = this.exchangeName.toUpperCase();
+
 		// Header
 		blessed.box({
 			parent: this.screen,
@@ -210,7 +195,7 @@ class MarketMonitor {
 			left: 0,
 			width: "100%",
 			height: 3,
-			content: `{center}{bold}ZO MARKET MONITOR{/bold} - ${this.targetSymbol.toUpperCase()} | ${1000 / RENDER_INTERVAL_MS} FPS{/center}`,
+			content: `{center}{bold}${displayName} MARKET MONITOR{/bold} - ${this.targetSymbol.toUpperCase()} | ${1000 / RENDER_INTERVAL_MS} FPS{/center}`,
 			tags: true,
 			style: {
 				fg: "white",
@@ -298,48 +283,12 @@ class MarketMonitor {
 		this.screen.render();
 	}
 
-	private handleOrderbookUpdate(
-		bids: Map<number, number>,
-		asks: Map<number, number>,
-	): void {
-		this.orderbookBids = new Map(bids);
-		this.orderbookAsks = new Map(asks);
-		this.scheduleRender();
-	}
-
-	private handleTradesUpdate(rawData: unknown): void {
-		const data = rawData as {
-			trades?: Array<{ side: string; price: number; size: number }>;
-		};
-
-		if (!data.trades) return;
-
-		for (const t of data.trades) {
-			// side: "ask" = taker bought (hit the ask), "bid" = taker sold (hit the bid)
-			const trade: Trade = {
-				time: Date.now(),
-				side: t.side === "ask" ? "buy" : "sell",
-				price: t.price,
-				size: t.size,
-			};
-			// Add to front (newest first)
-			this.recentTrades.unshift(trade);
-		}
-
-		// Keep limited history
-		if (this.recentTrades.length > MAX_TRADES) {
-			this.recentTrades.length = MAX_TRADES;
-		}
-
-		this.scheduleRender();
-	}
-
 	private updateFairPrice(): void {
-		if (this.binancePrice && this.zoPrice) {
+		if (this.binancePrice && this.exchangePrice) {
 			if (
-				Math.abs(this.binancePrice.timestamp - this.zoPrice.timestamp) < 1000
+				Math.abs(this.binancePrice.timestamp - this.exchangePrice.timestamp) < 1000
 			) {
-				this.fairPriceCalc.addSample(this.zoPrice.mid, this.binancePrice.mid);
+				this.fairPriceCalc.addSample(this.exchangePrice.mid, this.binancePrice.mid);
 			}
 
 			const fp = this.fairPriceCalc.getFairPrice(this.binancePrice.mid);
@@ -388,10 +337,8 @@ class MarketMonitor {
 		const elapsed = now - this.lastRenderTime;
 
 		if (elapsed >= RENDER_INTERVAL_MS) {
-			// Enough time passed, render immediately
 			this.doRender();
 		} else if (!this.renderPending) {
-			// Schedule render for later
 			this.renderPending = true;
 			setTimeout(() => {
 				this.renderPending = false;
@@ -408,13 +355,13 @@ class MarketMonitor {
 		this.screen.render();
 	}
 
-	// Legacy render for compatibility
 	private render(): void {
 		this.scheduleRender();
 	}
 
 	private renderPricing(): void {
 		const lines: string[] = [];
+		const exchangeLabel = this.exchangeName === "zo" ? "01" : this.exchangeName.slice(0, 6);
 
 		// Binance
 		if (this.binancePrice) {
@@ -425,18 +372,18 @@ class MarketMonitor {
 			lines.push(` Binance {yellow-fg}--{/yellow-fg}`);
 		}
 
-		// 01 Exchange
-		if (this.zoPrice) {
-			const price = this.formatPrice(this.zoPrice.mid);
-			const rate = `${this.getUpdatesPerSecond(this.zoUpdates).toFixed(FMT_DECIMALS.BPS)}/s`;
-			lines.push(` 01      $${price} {gray-fg}${rate}{/gray-fg}`);
+		// Exchange
+		if (this.exchangePrice) {
+			const price = this.formatPrice(this.exchangePrice.mid);
+			const rate = `${this.getUpdatesPerSecond(this.exchangeUpdates).toFixed(FMT_DECIMALS.BPS)}/s`;
+			lines.push(` ${exchangeLabel.padEnd(7)} $${price} {gray-fg}${rate}{/gray-fg}`);
 		} else {
-			lines.push(` 01      {yellow-fg}--{/yellow-fg}`);
+			lines.push(` ${exchangeLabel.padEnd(7)} {yellow-fg}--{/yellow-fg}`);
 		}
 
-		// Current offset (01 - Binance)
-		if (this.binancePrice && this.zoPrice) {
-			const offset = this.zoPrice.mid - this.binancePrice.mid;
+		// Current offset (exchange - Binance)
+		if (this.binancePrice && this.exchangePrice) {
+			const offset = this.exchangePrice.mid - this.binancePrice.mid;
 			const offsetBps = ((offset / this.binancePrice.mid) * 10000).toFixed(FMT_DECIMALS.BPS);
 			const sign = offset >= 0 ? "+" : "";
 			lines.push(` Offset  ${sign}${offsetBps}bps`);
@@ -549,7 +496,6 @@ class MarketMonitor {
 	}
 
 	private addLog(message: string): void {
-		// Message already has timestamp from logger, just display it
 		this.logBox.log(message);
 		this.screen.render();
 	}
@@ -557,22 +503,27 @@ class MarketMonitor {
 	private shutdown(): void {
 		this.restoreConsole?.();
 		this.binanceFeed?.close();
-		this.zoOrderbook?.close();
+		this.feed?.close();
 		this.screen.destroy();
 		process.exit(0);
 	}
 }
 
 function main(): void {
-	const symbol = process.argv[2]?.toUpperCase();
+	const args = process.argv.slice(2);
 
-	if (!symbol) {
-		console.error("Usage: npm run monitor -- <symbol>");
-		console.error("Example: npm run monitor -- BTC");
+	if (args.length < 2) {
+		console.error("Usage: npm run monitor -- <exchange> <symbol>");
+		console.error("Examples:");
+		console.error("  npm run monitor -- zo BTC");
+		console.error("  npm run monitor -- hyperliquid BTC");
 		process.exit(1);
 	}
 
-	const monitor = new MarketMonitor(symbol);
+	const exchange = args[0].toLowerCase();
+	const symbol = args[1].toUpperCase();
+
+	const monitor = new MarketMonitor(exchange, symbol);
 	monitor.run().catch((err) => {
 		console.error("Fatal error:", err);
 		process.exit(1);

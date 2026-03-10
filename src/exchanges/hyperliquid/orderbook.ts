@@ -1,7 +1,7 @@
 // Hyperliquid L2 orderbook stream — full snapshot per message (no deltas)
 
 import WebSocket from "ws";
-import type { BBO, MidPrice, PriceCallback } from "../../types.js";
+import type { BBO, MidPrice, OrderbookUpdateCallback, PriceCallback } from "../../types.js";
 import { log } from "../../utils/logger.js";
 import type { WsL2BookMsg } from "./types.js";
 
@@ -41,6 +41,10 @@ class OrderbookSide {
 		return this.levels.size;
 	}
 
+	getLevels(): Map<number, number> {
+		return new Map(this.levels);
+	}
+
 	private rebuildSortedPrices(): void {
 		this.sortedPrices = Array.from(this.levels.keys());
 		if (this.isAsk) {
@@ -69,6 +73,7 @@ export class HyperliquidOrderbookStream {
 	private consecutiveFailures = 0;
 
 	onPrice: PriceCallback | null = null;
+	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
 
 	constructor(
 		private readonly coin: string,
@@ -183,6 +188,10 @@ export class HyperliquidOrderbookStream {
 		};
 
 		this.onPrice?.(this.latestPrice);
+
+		if (this.onOrderbookUpdate) {
+			this.onOrderbookUpdate(this.bids.getLevels(), this.asks.getLevels());
+		}
 	}
 
 	private waitForFirstSnapshot(): Promise<void> {

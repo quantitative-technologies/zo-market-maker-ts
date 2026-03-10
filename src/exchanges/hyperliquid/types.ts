@@ -273,4 +273,19 @@ export interface WsOrderUpdatesMsg {
 	data: WsOrderUpdate[];
 }
 
-export type WsMessage = WsL2BookMsg | WsUserFillMsg | WsOrderUpdatesMsg;
+export interface WsTradesMsg {
+	channel: "trades";
+	data: WsTrade[];
+}
+
+export interface WsTrade {
+	coin: string;
+	side: "A" | "B"; // A = taker sold (hit bid), B = taker bought (hit ask)
+	px: string;
+	sz: string;
+	time: number;
+	hash: string;
+	tid: number;
+}
+
+export type WsMessage = WsL2BookMsg | WsUserFillMsg | WsOrderUpdatesMsg | WsTradesMsg;
