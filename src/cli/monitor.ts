@@ -19,6 +19,10 @@ const STATS_WINDOW_MS = 60_000;
 const ORDERBOOK_DEPTH = 10;
 const MAX_TRADES = 100;
 const RENDER_INTERVAL_MS = 100;
+const STALE_THRESHOLD_MS = 30_000;
+const STALE_CHECK_INTERVAL_MS = 5_000;
+const RECONNECT_DELAY_MS = 1_000;
+const MAX_BOOK_LEVELS = 100;
 
 interface PriceState {
 	mid: number;
@@ -132,7 +136,15 @@ class MarketMonitor {
 		};
 
 		// Setup Zo orderbook stream (handles both pricing and depth display)
-		this.zoOrderbook = new ZoOrderbookStream(this.nord, market.symbol);
+		this.zoOrderbook = new ZoOrderbookStream(
+			this.nord,
+			market.symbol,
+			undefined,
+			STALE_THRESHOLD_MS,
+			STALE_CHECK_INTERVAL_MS,
+			RECONNECT_DELAY_MS,
+			MAX_BOOK_LEVELS,
+		);
 		this.zoOrderbook.onPrice = (price) => {
 			this.zoPrice = price;
 			this.recordUpdate(this.zoUpdates);

@@ -258,6 +258,114 @@ https://docs.extended.exchange/about-extended/technical-architecture
 **[16]** Extended Trading Fees & Rebates — maker 0%, rebate tiers, payout schedule
 https://docs.extended.exchange/extended-resources/trading/trading-fees-and-rebates
 
+<a id="n1-docs"></a>
+**[17]** N1 Introduction & 01 Exchange FAQ — Proton chain, curated operator model, Priority Access Program
+https://docs.n1.xyz/learn/introduction-to-n1 / https://docs.01.xyz/support/faq/general
+
+<a id="hl-obs"></a>
+**[18]** Hyperliquid Order Book Server — open-source Rust WS server for L2/L4 book from node output
+https://github.com/hyperliquid-dex/order_book_server
+
+<a id="hl-node-gh"></a>
+**[19]** Hyperliquid Node Setup — hardware requirements, configuration, peering
+https://github.com/hyperliquid-dex/node
+
+<a id="qn-hl"></a>
+**[20]** QuickNode: Hyperliquid RPC Providers Comparison — provider landscape, pricing, features
+https://blog.quicknode.com/best-hyperliquid-rpc-providers-2026-full-comparison/
+
+<a id="dw-hl"></a>
+**[21]** Dwellir: Hyperliquid RPC — dedicated clusters, co-location, gRPC streaming
+https://www.dwellir.com/networks/hyperliquid
+
+<a id="ext-vision"></a>
+**[22]** Extended Rationale & Vision — future validator program, open-source state machines
+https://docs.extended.exchange/starknet-migration/rationale-and-vision
+
+---
+
+## Infrastructure & Latency
+
+### DEX Architecture Models
+
+The infrastructure needed depends on the DEX's architecture:
+
+| Model | How it works | Examples |
+|---|---|---|
+| **App-chain** | Orderbook lives on a dedicated L1. Every node replicates state. | Hyperliquid, dYdX v4 |
+| **Hybrid CLOB** | Centralized off-chain matching engine, on-chain settlement. | Extended, Paradex |
+| **01 (unique)** | Own chain (Proton/NordVM), but no public node program. | 01 Exchange |
+
+### Node vs No Node
+
+A node gives you faster **reads** (market data), not faster **writes** (order submission). You see price changes sooner, so you can react sooner — but your cancel/modify still travels the same network path as everyone else.
+
+| Exchange | Own node? | What it gives you | What it doesn't give you |
+|---|---|---|---|
+| **Hyperliquid** | Yes (non-validating) [[13]](#hl-optimize) | Local orderbook from block outputs, no API rate limits for reads | Faster order submission — still goes through public API [[13]](#hl-optimize) |
+| **Extended** | No (centralized ME) [[15]](#ext-arch) | N/A | N/A — co-locate in AWS Tokyo instead [[2]](#ext-api) |
+| **01** | Not available [[17]](#n1-docs) | N/A — curated operator model, no public validators | N/A |
+
+### Feed Latency vs Order Submission Latency
+
+These are two separate concerns. Feed latency determines how quickly you *detect* a price move. Order submission latency determines how quickly your reaction *reaches* the matching engine. Both matter for adverse selection — seeing the move first is only useful if you can act on it before getting picked off.
+
+| Exchange | Feed latency (best case) | Feed latency (public API) | Order submission latency |
+|---|---|---|---|
+| **Hyperliquid** | Block execution time (local node read) [[13]](#hl-optimize) | API WS: ~50-200ms [[12]](#hl-latency) | ~200ms median co-located [[12]](#hl-latency) |
+| **Extended** | WS push every 100ms [[7]](#ext-ws) | Same (no node alternative) | Network RTT to AWS Tokyo [[2]](#ext-api) |
+| **01** | WS delta stream [[4]](#o1-docs) | Same (no node alternative) | Network RTT to `zo-mainnet.n1.xyz` |
+
+Order submission latency on app-chains is bounded by consensus/block time (~200ms on Hyperliquid, ~1s blocks). No amount of co-location gets below this floor. On hybrid CLOBs (Extended), the floor is matching engine processing time — not documented, but network RTT to Tokyo dominates.
+
+### Hyperliquid Node Details
+
+Running a non-validating node replicates chain state locally [[13]](#hl-optimize):
+
+- Streams raw L1 data to `~/hl/data/`: blocks, snapshots (every 10K blocks), trades, fills, order statuses, book diffs, oracle updates
+- Use `--disable-output-file-buffering` for outputs as soon as blocks execute
+- Open-source [order_book_server](https://github.com/hyperliquid-dex/order_book_server) [[18]](#hl-obs) builds L2/L4 books from node output
+- Co-locate in **Tokyo** (AWS apne1-az1 where Foundation node runs) [[13]](#hl-optimize)
+- Cancel optimization: noop-based nonce invalidation instead of explicit cancel [[13]](#hl-optimize)
+
+**Hardware requirements** [[19]](#hl-node-gh):
+
+| | Non-validating | Validator |
+|---|---|---|
+| vCPUs | 16 | 32 |
+| RAM | 64 GB | 128 GB |
+| Storage | 500 GB SSD (500 MB/s) | 1 TB SSD |
+| OS | Ubuntu 24.04 | Ubuntu 24.04 |
+| Ports | 4001-4002 open | 4001-4002 open |
+
+**Third-party node/RPC providers** (alternative to self-hosting):
+
+| Provider | Offering | Price | Source |
+|---|---|---|---|
+| QuickNode | All 7 HyperCore data streams, gRPC, zstd compression | $49-999/mo | [[20]](#qn-hl) |
+| Dwellir | gRPC streaming, dedicated order book server, co-location | $699-1150/mo | [[21]](#dw-hl) |
+| Hydromancer | L4 orderbook with address visibility | $300-2500/mo | [[20]](#qn-hl) |
+
+### 01 Exchange Infrastructure
+
+01 runs on N1's Proton chain, **not Solana** — Solana is only used for deposits/withdrawals [[17]](#n1-docs). The `solanaConnection` in the SDK handles wallet auth and bridging, not trade execution.
+
+- Orders go to `zo-mainnet.n1.xyz` via HTTP/WS, executed on Proton
+- Running a Solana RPC node provides **zero trading latency benefit**
+- No public validator or node program — curated operator model [[17]](#n1-docs)
+- N1 has a [Priority Access Program](https://tally.so/r/wM8KRg) for MM infrastructure guidance
+- Server location unknown — co-location requires contacting N1 team
+
+### Extended Infrastructure
+
+Centralized matching engine with Starknet settlement [[15]](#ext-arch):
+
+- **Co-locate in AWS ap-northeast-1a (Tokyo)** — explicitly recommended in docs [[2]](#ext-api)
+- No node to run, no validator program (planned for future [[22]](#ext-vision))
+- Functionally identical to a CEX for latency — competitive edge is co-location + algorithm
+- REST is async: returns order ID before book confirmation, actual confirmation via WS [[2]](#ext-api)
+- Future roadmap: open-source validator state machines with "latency under 100ms" target [[22]](#ext-vision)
+
 ---
 
 ## Adapter Complexity Estimate

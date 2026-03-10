@@ -1,8 +1,6 @@
 import type { Nord, NordUser, WebSocketAccountUpdate } from "@n1xyz/nord-ts";
 import { log } from "../utils/logger.js";
 
-const RECONNECT_DELAY_MS = 3000;
-
 // Tracked order from WebSocket
 export interface TrackedOrder {
 	orderId: string;
@@ -31,11 +29,14 @@ export class AccountStream {
 	// For re-sync on reconnect
 	private user: NordUser | null = null;
 
+	private consecutiveFailures = 0;
+
 	constructor(
 		private readonly nord: Nord,
 		private readonly accountId: number,
-		private readonly staleThresholdMs = 60_000,
-		private readonly staleCheckIntervalMs = 10_000,
+		private readonly staleThresholdMs: number,
+		private readonly staleCheckIntervalMs: number,
+		private readonly reconnectDelayMs: number,
 	) {}
 
 	setOnFill(callback: FillCallback): void {
@@ -109,26 +110,37 @@ export class AccountStream {
 			this.subscription = null;
 		}
 
-		log.info(`Reconnecting to account stream in ${RECONNECT_DELAY_MS}ms...`);
+		// Immediate first attempt, then configurable backoff
+		const delay = this.consecutiveFailures === 0 ? 0 : this.reconnectDelayMs;
+		if (delay > 0) {
+			log.info(`Reconnecting to account stream in ${delay}ms...`);
+		}
 		this.reconnectTimeout = setTimeout(() => {
 			this.reconnectTimeout = null;
 			void this.reconnect();
-		}, RECONNECT_DELAY_MS);
+		}, delay);
 	}
 
 	private async reconnect(): Promise<void> {
-		this.lastMessageTime = 0;
+		try {
+			this.lastMessageTime = 0;
 
-		// Re-sync orders before reconnecting
-		if (this.user) {
-			await this.resyncOrders();
+			// Re-sync orders before reconnecting
+			if (this.user) {
+				await this.resyncOrders();
+			}
+
+			// Reconnect
+			this.subscription = this.nord.subscribeAccount(this.accountId);
+			this.setupEventHandlers();
+
+			this.consecutiveFailures = 0;
+			log.info("Account stream reconnected");
+		} catch (err) {
+			this.consecutiveFailures++;
+			log.error("Account stream reconnect failed:", err);
+			this.scheduleReconnect();
 		}
-
-		// Reconnect
-		this.subscription = this.nord.subscribeAccount(this.accountId);
-		this.setupEventHandlers();
-
-		log.info("Account stream reconnected");
 	}
 
 	private async resyncOrders(): Promise<void> {

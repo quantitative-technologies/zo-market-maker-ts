@@ -6,8 +6,6 @@ import type {
 import type { MidPrice, PriceCallback } from "../types.js";
 import { log } from "../utils/logger.js";
 
-const RECONNECT_DELAY_MS = 3000;
-const MAX_LEVELS = 100; // Only keep top N levels (we only need BBO)
 
 // Re-export from shared types
 export type { BBO } from "../types.js";
@@ -24,11 +22,11 @@ export type OrderbookUpdateCallback = (
 class OrderbookSide {
 	private levels = new Map<number, number>();
 	private sortedPrices: number[] = [];
-	private readonly isAsk: boolean;
 
-	constructor(isAsk: boolean) {
-		this.isAsk = isAsk;
-	}
+	constructor(
+		private readonly isAsk: boolean,
+		private readonly maxLevels: number,
+	) {}
 
 	// Apply delta updates (size=0 means delete)
 	applyDeltas(entries: OrderbookEntry[]): void {
@@ -72,9 +70,9 @@ class OrderbookSide {
 			this.sortedPrices.sort((a, b) => b - a); // Descending for bids
 		}
 
-		// Trim to MAX_LEVELS to prevent memory growth
-		if (this.sortedPrices.length > MAX_LEVELS) {
-			const removed = this.sortedPrices.splice(MAX_LEVELS);
+		// Trim to maxLevels to prevent memory growth
+		if (this.sortedPrices.length > this.maxLevels) {
+			const removed = this.sortedPrices.splice(this.maxLevels);
 			for (const price of removed) {
 				this.levels.delete(price);
 			}
@@ -103,8 +101,8 @@ class OrderbookSide {
 
 export class ZoOrderbookStream {
 	private subscription: ReturnType<Nord["subscribeOrderbook"]> | null = null;
-	private bids = new OrderbookSide(false);
-	private asks = new OrderbookSide(true);
+	private bids: OrderbookSide;
+	private asks: OrderbookSide;
 	private latestPrice: MidPrice | null = null;
 	private lastUpdateId = 0;
 	private lastUpdateTime = 0;
@@ -113,6 +111,7 @@ export class ZoOrderbookStream {
 	private reconnectTimeout: NodeJS.Timeout | null = null;
 	private snapshotLoaded = false;
 	private deltaBuffer: unknown[] = []; // Buffer deltas until snapshot is loaded
+	private consecutiveFailures = 0;
 
 	// Public callbacks - can be set after construction
 	onPrice: PriceCallback | null = null;
@@ -121,11 +120,15 @@ export class ZoOrderbookStream {
 	constructor(
 		private readonly nord: Nord,
 		private readonly symbol: string,
-		onPrice?: PriceCallback,
-		private readonly staleThresholdMs = 60_000,
-		private readonly staleCheckIntervalMs = 10_000,
+		onPrice: PriceCallback | undefined,
+		private readonly staleThresholdMs: number,
+		private readonly staleCheckIntervalMs: number,
+		private readonly reconnectDelayMs: number,
+		private readonly maxBookLevels: number,
 	) {
 		this.onPrice = onPrice ?? null;
+		this.bids = new OrderbookSide(false, this.maxBookLevels);
+		this.asks = new OrderbookSide(true, this.maxBookLevels);
 	}
 
 	async connect(): Promise<void> {
@@ -239,11 +242,15 @@ export class ZoOrderbookStream {
 			this.subscription = null;
 		}
 
-		log.info(`Reconnecting to Zo orderbook in ${RECONNECT_DELAY_MS}ms...`);
+		// Immediate first attempt, then configurable backoff
+		const delay = this.consecutiveFailures === 0 ? 0 : this.reconnectDelayMs;
+		if (delay > 0) {
+			log.info(`Reconnecting to Zo orderbook in ${delay}ms...`);
+		}
 		this.reconnectTimeout = setTimeout(() => {
 			this.reconnectTimeout = null;
 			void this.reconnect();
-		}, RECONNECT_DELAY_MS);
+		}, delay);
 	}
 
 	private async reconnect(): Promise<void> {
@@ -261,16 +268,18 @@ export class ZoOrderbookStream {
 			// 3. Apply buffered deltas
 			this.applyBufferedDeltas();
 
+			this.consecutiveFailures = 0;
 			log.info("Zo orderbook reconnected");
 		} catch (err) {
+			this.consecutiveFailures++;
 			log.error("Orderbook reconnect failed:", err);
 			this.scheduleReconnect();
 		}
 	}
 
 	private resetState(): void {
-		this.bids.clear();
-		this.asks.clear();
+		this.bids = new OrderbookSide(false, this.maxBookLevels);
+		this.asks = new OrderbookSide(true, this.maxBookLevels);
 		this.latestPrice = null;
 		this.lastUpdateId = 0;
 		this.lastUpdateTime = 0;

@@ -47,6 +47,8 @@ function main(): void {
 		symbol: config.symbol,
 		staleThresholdMs: config.staleThresholdMs,
 		staleCheckIntervalMs: config.staleCheckIntervalMs,
+		reconnectDelayMs: config.reconnectDelayMs,
+		maxBookLevels: config.maxBookLevels,
 	});
 
 	const bot = new MarketMaker(config, adapter);
