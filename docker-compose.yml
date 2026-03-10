@@ -15,24 +15,24 @@ x-mm-common: &mm-common
 services:
   mm-sol:
     <<: *mm-common
-    command: ["SOL"]
+    command: SOL ${MM_ARGS:-}
 
   mm-btc:
     <<: *mm-common
-    command: ["BTC"]
+    command: BTC ${MM_ARGS:-}
 
   mm-eth:
     <<: *mm-common
-    command: ["ETH"]
+    command: ETH ${MM_ARGS:-}
 
   mm-hype:
     <<: *mm-common
-    command: ["HYPE"]
+    command: HYPE ${MM_ARGS:-}
 
   mm-xrp:
     <<: *mm-common
-    command: ["XRP"]
+    command: XRP ${MM_ARGS:-}
 
   mm-sui:
     <<: *mm-common
-    command: ["SUI"]
+    command: SUI ${MM_ARGS:-}

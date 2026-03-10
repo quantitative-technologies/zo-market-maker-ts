@@ -13,6 +13,7 @@ import type {
 export interface BalanceSnapshot {
 	readonly balance: number;
 	readonly fundingPnlByMarket: Map<number, number>;
+	readonly unrealizedPnlByMarket: Map<number, number>;
 }
 
 export interface FeeRateInfo {

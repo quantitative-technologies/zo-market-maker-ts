@@ -27,11 +27,13 @@ const BASE_URL = "https://api.hyperliquid.xyz";
 
 export class HyperliquidClient {
 	readonly account: LocalAccount;
-	readonly address: Hex;
+	readonly walletAddress: Hex;
 
-	constructor(privateKey: Hex) {
+	constructor(privateKey: Hex, walletAddress?: Hex) {
 		this.account = privateKeyToAccount(privateKey);
-		this.address = this.account.address;
+		// API wallet: queries and vault operations use the main wallet address
+		// Direct wallet: use the derived address
+		this.walletAddress = walletAddress ?? this.account.address;
 	}
 
 	// ── Info endpoints (no auth) ──
@@ -42,31 +44,31 @@ export class HyperliquidClient {
 
 	async getClearinghouseState(): Promise<ClearinghouseState> {
 		return this.postInfo<ClearinghouseState>("clearinghouseState", {
-			user: this.address,
+			user: this.walletAddress,
 		});
 	}
 
 	async getOpenOrders(): Promise<OpenOrder[]> {
 		return this.postInfo<OpenOrder[]>("openOrders", {
-			user: this.address,
+			user: this.walletAddress,
 		});
 	}
 
 	async getUserFills(startTime?: number): Promise<UserFill[]> {
 		if (startTime !== undefined) {
 			return this.postInfo<UserFill[]>("userFillsByTime", {
-				user: this.address,
+				user: this.walletAddress,
 				startTime,
 			});
 		}
 		return this.postInfo<UserFill[]>("userFills", {
-			user: this.address,
+			user: this.walletAddress,
 		});
 	}
 
 	async getUserFees(): Promise<UserFees> {
 		return this.postInfo<UserFees>("userFees", {
-			user: this.address,
+			user: this.walletAddress,
 		});
 	}
 
@@ -141,6 +143,7 @@ export class HyperliquidClient {
 
 	private async postExchange(action: OrderAction | CancelAction | BatchModifyAction): Promise<ExchangeResponse> {
 		const nonce = Date.now();
+		// API wallets sign directly — no vaultAddress needed
 		const signature = await signAction(this.account, action, nonce);
 
 		const body = {
@@ -162,6 +165,20 @@ export class HyperliquidClient {
 
 		return res.json() as Promise<ExchangeResponse>;
 	}
+}
+
+// ── Price/size rounding ──
+
+const MAX_SIGNIFICANT_FIGURES = 5;
+const MAX_PRICE_DECIMALS_PERP = 6;
+
+/**
+ * Round price per Hyperliquid rules: 5 significant figures, max 6 - szDecimals decimal places.
+ * Mirrors Python SDK: round(float(f"{px:.5g}"), 6 - sz_decimals)
+ */
+export function roundPrice(price: number, szDecimals: number): number {
+	const sigFigRounded = Number(price.toPrecision(MAX_SIGNIFICANT_FIGURES));
+	return Number(sigFigRounded.toFixed(MAX_PRICE_DECIMALS_PERP - szDecimals));
 }
 
 // ── Wire format helpers ──
