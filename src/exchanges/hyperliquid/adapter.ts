@@ -8,6 +8,7 @@ import {
 	buildCancelWire,
 	buildModifyWire,
 	buildOrderWire,
+	roundPrice,
 } from "./client.js";
 import { HyperliquidAccountStream } from "./account.js";
 import { HyperliquidOrderbookStream } from "./orderbook.js";
@@ -50,11 +51,15 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 
 	constructor(
 		private readonly privateKey: string,
+		private readonly walletAddress: string | undefined,
 		private readonly adapterConfig: HyperliquidAdapterConfig,
 	) {}
 
 	async connect(): Promise<MarketInfo> {
-		this.client = new HyperliquidClient(this.privateKey as Hex);
+		this.client = new HyperliquidClient(
+			this.privateKey as Hex,
+			this.walletAddress as Hex | undefined,
+		);
 
 		// Resolve symbol → asset index + size decimals
 		const meta = await this.client.getMeta();
@@ -70,8 +75,9 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		this.assetIndex = idx;
 		this.szDecimals = meta.universe[idx].szDecimals;
 
-		// Hyperliquid uses 8 decimal places for prices universally
-		const priceDecimals = 8;
+		// Hyperliquid perps: max decimal places = 6 - szDecimals, max 5 significant figures
+		const MAX_PRICE_DECIMALS_PERP = 6;
+		const priceDecimals = MAX_PRICE_DECIMALS_PERP - this.szDecimals;
 		// Quote token is always USD on Hyperliquid (no separate quote token)
 		const quoteDecimals = 2;
 
@@ -88,7 +94,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		};
 
 		this.accountStream = new HyperliquidAccountStream(
-			this.client.address,
+			this.client.walletAddress,
 			this.adapterConfig.symbol,
 			this.adapterConfig.staleThresholdMs,
 			this.adapterConfig.staleCheckIntervalMs,
@@ -151,7 +157,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 				const orderWire = buildOrderWire(
 					this.assetIndex,
 					place.side === "bid",
-					place.price.toNumber(),
+					roundPrice(place.price.toNumber(), this.szDecimals),
 					place.size.toNumber(),
 					false,
 					"Alo",
@@ -190,7 +196,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 				buildOrderWire(
 					this.assetIndex,
 					place.side === "bid",
-					place.price.toNumber(),
+					roundPrice(place.price.toNumber(), this.szDecimals),
 					place.size.toNumber(),
 					false,
 					"Alo",
@@ -232,7 +238,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		const orderWire = buildOrderWire(
 			this.assetIndex,
 			isBuy,
-			Number(price),
+			roundPrice(Number(price), this.szDecimals),
 			Math.abs(baseSize),
 			true, // reduceOnly
 			"Ioc",
@@ -274,18 +280,18 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 
 		const balance = Number(state.crossMarginSummary.accountValue);
 
-		// Extract cumulative funding per position
+		// Extract cumulative funding and unrealized PnL per position
 		const fundingPnlByMarket = new Map<number, number>();
+		const unrealizedPnlByMarket = new Map<number, number>();
 		for (const ap of state.assetPositions) {
-			// Use allTime cumulative funding
-			const funding = Number(ap.position.cumFunding.allTime);
 			// We don't have a numeric market ID on Hyperliquid — use 0 for the active market
 			if (ap.position.coin.toUpperCase() === this.adapterConfig.symbol.toUpperCase()) {
-				fundingPnlByMarket.set(0, funding);
+				fundingPnlByMarket.set(0, Number(ap.position.cumFunding.allTime));
+				unrealizedPnlByMarket.set(0, Number(ap.position.unrealizedPnl));
 			}
 		}
 
-		return { balance, fundingPnlByMarket };
+		return { balance, fundingPnlByMarket, unrealizedPnlByMarket };
 	}
 
 	async fetchFeeRates(): Promise<FeeRateInfo> {

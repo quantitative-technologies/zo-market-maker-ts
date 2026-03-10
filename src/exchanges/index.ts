@@ -9,6 +9,7 @@ export type { ExchangeAdapter } from "./adapter.js";
 export interface CreateAdapterOptions {
 	readonly exchange: string;
 	readonly privateKey: string;
+	readonly walletAddress?: string;
 	readonly symbol: string;
 	readonly staleThresholdMs: number;
 	readonly staleCheckIntervalMs: number;
@@ -36,7 +37,7 @@ export function createAdapter(options: CreateAdapterOptions): ExchangeAdapter {
 				reconnectDelayMs: options.reconnectDelayMs,
 				maxBookLevels: options.maxBookLevels,
 			};
-			return new HyperliquidAdapter(options.privateKey, config);
+			return new HyperliquidAdapter(options.privateKey, options.walletAddress, config);
 		}
 		default:
 			throw new Error(

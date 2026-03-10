@@ -45,17 +45,21 @@ function parseArgs(): {
 function main(): void {
 	const { symbol, configPath, closePosition } = parseArgs();
 
-	const privateKey = process.env.PRIVATE_KEY;
+	const config = loadConfig(symbol, configPath);
+
+	const envKeyName = `${config.exchange.toUpperCase()}_PRIVATE_KEY`;
+	const privateKey = process.env[envKeyName];
 	if (!privateKey) {
-		console.error("Missing required environment variable: PRIVATE_KEY");
+		console.error(`Missing required environment variable: ${envKeyName}`);
 		process.exit(1);
 	}
 
-	const config = loadConfig(symbol, configPath);
+	const walletAddress = process.env[`${config.exchange.toUpperCase()}_WALLET_ADDRESS`];
 
 	const adapter = createAdapter({
 		exchange: config.exchange,
 		privateKey,
+		walletAddress,
 		symbol: config.symbol,
 		staleThresholdMs: config.staleThresholdMs,
 		staleCheckIntervalMs: config.staleCheckIntervalMs,
