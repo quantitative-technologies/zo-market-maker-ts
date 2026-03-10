@@ -1,6 +1,7 @@
 // Exchange adapter factory
 
 import type { ExchangeAdapter } from "./adapter.js";
+import { HyperliquidAdapter, type HyperliquidAdapterConfig } from "./hyperliquid/adapter.js";
 import { ZoAdapter, type ZoAdapterConfig } from "./zo/adapter.js";
 
 export type { ExchangeAdapter } from "./adapter.js";
@@ -11,6 +12,8 @@ export interface CreateAdapterOptions {
 	readonly symbol: string;
 	readonly staleThresholdMs: number;
 	readonly staleCheckIntervalMs: number;
+	readonly reconnectDelayMs: number;
+	readonly maxBookLevels: number;
 }
 
 export function createAdapter(options: CreateAdapterOptions): ExchangeAdapter {
@@ -20,12 +23,24 @@ export function createAdapter(options: CreateAdapterOptions): ExchangeAdapter {
 				symbol: options.symbol,
 				staleThresholdMs: options.staleThresholdMs,
 				staleCheckIntervalMs: options.staleCheckIntervalMs,
+				reconnectDelayMs: options.reconnectDelayMs,
+				maxBookLevels: options.maxBookLevels,
 			};
 			return new ZoAdapter(options.privateKey, config);
 		}
+		case "hyperliquid": {
+			const config: HyperliquidAdapterConfig = {
+				symbol: options.symbol,
+				staleThresholdMs: options.staleThresholdMs,
+				staleCheckIntervalMs: options.staleCheckIntervalMs,
+				reconnectDelayMs: options.reconnectDelayMs,
+				maxBookLevels: options.maxBookLevels,
+			};
+			return new HyperliquidAdapter(options.privateKey, config);
+		}
 		default:
 			throw new Error(
-				`Unknown exchange: "${options.exchange}". Supported: zo`,
+				`Unknown exchange: "${options.exchange}". Supported: zo, hyperliquid`,
 			);
 	}
 }

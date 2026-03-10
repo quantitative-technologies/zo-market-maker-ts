@@ -43,6 +43,8 @@ export interface ZoAdapterConfig {
 	readonly symbol: string;
 	readonly staleThresholdMs: number;
 	readonly staleCheckIntervalMs: number;
+	readonly reconnectDelayMs: number;
+	readonly maxBookLevels: number;
 }
 
 export class ZoAdapter implements ExchangeAdapter {
@@ -92,6 +94,7 @@ export class ZoAdapter implements ExchangeAdapter {
 			accountId,
 			this.adapterConfig.staleThresholdMs,
 			this.adapterConfig.staleCheckIntervalMs,
+			this.adapterConfig.reconnectDelayMs,
 		);
 		this.orderbookStream = new ZoOrderbookStream(
 			nord,
@@ -99,6 +102,8 @@ export class ZoAdapter implements ExchangeAdapter {
 			undefined,
 			this.adapterConfig.staleThresholdMs,
 			this.adapterConfig.staleCheckIntervalMs,
+			this.adapterConfig.reconnectDelayMs,
+			this.adapterConfig.maxBookLevels,
 		);
 
 		// Wire fill callback

@@ -25,6 +25,8 @@ export interface MarketMakerConfig {
   readonly staleThresholdMs: number // Consider stream stale after this many ms
   readonly balanceSyncIntervalMs: number // Interval for balance sync
   readonly staleCheckIntervalMs: number // How often to check for staleness
+  readonly reconnectDelayMs: number // Base delay for WS reconnect backoff
+  readonly maxBookLevels: number // Max orderbook levels to store per side
   readonly markoutHorizonsMs: readonly number[] // Markout observation horizons (ms)
 }
 
@@ -46,6 +48,8 @@ const KEY_MAP: Record<string, keyof Omit<MarketMakerConfig, 'symbol' | 'exchange
   balance_sync_interval_ms: 'balanceSyncIntervalMs',
   stale_threshold_ms: 'staleThresholdMs',
   stale_check_interval_ms: 'staleCheckIntervalMs',
+  reconnect_delay_ms: 'reconnectDelayMs',
+  max_book_levels: 'maxBookLevels',
 }
 
 // All TOML keys that must be present (globally or per-symbol)
