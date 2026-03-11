@@ -235,7 +235,11 @@ export interface L2Level {
 
 export interface WsUserFillMsg {
 	channel: "userFills";
-	data: WsUserFill[];
+	data: {
+		isSnapshot: boolean;
+		user: string;
+		fills: WsUserFill[];
+	};
 }
 
 export interface WsUserFill {

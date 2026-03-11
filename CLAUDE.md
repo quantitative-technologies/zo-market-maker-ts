@@ -23,10 +23,20 @@
 
 - Never guess at root causes. Every assumption must be confirmed with evidence (logs, data, code trace).
 - Do not say "likely" or "probably" when diagnosing issues. Either verify the hypothesis or state clearly that it is unverified.
+- When an API returns unexpected data, inspect/log the actual value before proposing a fix. Do not speculate about what the data "probably" looks like.
 
 ## Code Style
 
 - Avoid defensive programming. Do not add fallbacks, guards, or alternative paths for scenarios that cannot happen in practice. If uncertain whether a code path is reachable, ask the user before adding a guard.
+
+## Self-Correction
+
+- Whenever corrected, after making a mistake or misinterpreting, add a section in here (`CLAUDE.md`) to instruct future sessions, avoiding the mistake again.
+
+## Work Style
+
+- ALWAYS use subagents where possible, parallel work is better.
+- Follow SOLID design principles where possible.
 
 ## Git
 

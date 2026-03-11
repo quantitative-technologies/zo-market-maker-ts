@@ -100,7 +100,7 @@ export class HyperliquidAccountStream {
 	}
 
 	private handleUserFills(msg: WsUserFillMsg): void {
-		for (const fill of msg.data) {
+		for (const fill of msg.data.fills) {
 			if (fill.coin !== this.coin) continue;
 
 			const fillEvent: FillEvent = {

@@ -108,15 +108,10 @@ function hexToBytes(hex: Hex): Uint8Array {
 
 /**
  * Format a number for the Hyperliquid wire format.
- * Python SDK: float_to_wire → Decimal(f"{x:.8f}").normalize()
- * Must have at least one decimal place, no trailing zeros otherwise.
+ * Python SDK: float_to_wire → Decimal(f"{x:.8f}").normalize().__format__("f")
+ * Normalized decimal: no trailing zeros, no forced decimal point for integers.
  */
 export function floatToWire(x: number): string {
 	const d = new Decimal(x.toFixed(8));
-	const normalized = d.toFixed();
-	// Ensure at least one decimal place
-	if (!normalized.includes(".")) {
-		return normalized + ".0";
-	}
-	return normalized;
+	return d.toFixed();
 }

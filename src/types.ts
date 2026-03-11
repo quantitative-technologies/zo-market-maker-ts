@@ -67,4 +67,5 @@ export interface MarketInfo {
 	priceDecimals: number;
 	sizeDecimals: number;
 	quoteDecimals: number; // Quote token precision (e.g. 6 for USDC)
+	minOrderNotionalUsd: number; // Minimum order value in USD
 }

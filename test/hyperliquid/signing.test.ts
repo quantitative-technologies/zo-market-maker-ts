@@ -12,10 +12,10 @@ const TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae78
 const TEST_ACCOUNT = privateKeyToAccount(TEST_PRIVATE_KEY);
 
 describe("floatToWire", () => {
-	it("formats integers with one decimal place", () => {
-		expect(floatToWire(100)).toBe("100.0");
-		expect(floatToWire(0)).toBe("0.0");
-		expect(floatToWire(1)).toBe("1.0");
+	it("formats integers without decimal point (matches Python SDK)", () => {
+		expect(floatToWire(100)).toBe("100");
+		expect(floatToWire(0)).toBe("0");
+		expect(floatToWire(1)).toBe("1");
 	});
 
 	it("strips trailing zeros but keeps significant decimals", () => {
