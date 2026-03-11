@@ -14,6 +14,7 @@ import type {
 	ExchangeResponse,
 	MetaResponse,
 	ModifyWire,
+	SpotMetaResponse,
 	OpenOrder,
 	OrderAction,
 	OrderResponseSuccess,
@@ -40,6 +41,10 @@ export class HyperliquidClient {
 
 	async getMeta(): Promise<MetaResponse> {
 		return this.postInfo<MetaResponse>("meta");
+	}
+
+	async getSpotMeta(): Promise<SpotMetaResponse> {
+		return this.postInfo<SpotMetaResponse>("spotMeta");
 	}
 
 	async getClearinghouseState(): Promise<ClearinghouseState> {
@@ -170,7 +175,7 @@ export class HyperliquidClient {
 // ── Price/size rounding ──
 
 const MAX_SIGNIFICANT_FIGURES = 5;
-const MAX_PRICE_DECIMALS_PERP = 6;
+export const MAX_PRICE_DECIMALS_PERP = 6;
 
 /**
  * Round price per Hyperliquid rules: 5 significant figures, max 6 - szDecimals decimal places.

@@ -11,6 +11,21 @@ export interface MetaResponse {
 	universe: AssetMeta[];
 }
 
+// ── Spot meta endpoint ──
+
+export interface SpotToken {
+	name: string;
+	szDecimals: number;
+	weiDecimals: number;
+	index: number;
+	tokenId: string;
+}
+
+export interface SpotMetaResponse {
+	tokens: SpotToken[];
+	universe: Array<{ name: string; tokens: [number, number]; index: number }>;
+}
+
 // ── Clearinghouse state ──
 
 export interface AssetPosition {

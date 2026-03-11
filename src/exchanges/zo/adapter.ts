@@ -150,6 +150,7 @@ export class ZoAdapter implements ExchangeAdapter {
 			priceDecimals: market.priceDecimals,
 			sizeDecimals: market.sizeDecimals,
 			quoteDecimals,
+			minOrderNotionalUsd: 0,
 		};
 	}
 

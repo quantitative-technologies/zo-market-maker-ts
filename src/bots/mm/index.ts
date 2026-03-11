@@ -110,6 +110,11 @@ export class MarketMaker {
 		);
 
 		const marketInfo = await this.adapter.connect();
+		if (this.config.orderSizeUsd < marketInfo.minOrderNotionalUsd) {
+			throw new Error(
+				`order_size_usd (${this.config.orderSizeUsd}) is below exchange minimum ($${marketInfo.minOrderNotionalUsd})`,
+			);
+		}
 		initFmtDecimals(marketInfo);
 		this.marketSymbol = marketInfo.symbol;
 		this.priceDecimals = marketInfo.priceDecimals;

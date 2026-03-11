@@ -1,6 +1,7 @@
 // Hyperliquid MonitorFeed — read-only data feed (no auth)
 
 import type { CreateMonitorFeedOptions, MonitorFeed } from "../monitor-feed.js";
+import { MAX_PRICE_DECIMALS_PERP } from "./client.js";
 import { HyperliquidOrderbookStream } from "./orderbook.js";
 import { HyperliquidTradeStream } from "./trades.js";
 import type {
@@ -13,7 +14,6 @@ import type {
 } from "../../types.js";
 
 const BASE_URL = "https://api.hyperliquid.xyz";
-const MAX_PRICE_DECIMALS_PERP = 6;
 
 export class HyperliquidMonitorFeed implements MonitorFeed {
 	readonly name = "hyperliquid";
@@ -50,6 +50,22 @@ export class HyperliquidMonitorFeed implements MonitorFeed {
 		const asset = meta.universe[idx];
 		const priceDecimals = MAX_PRICE_DECIMALS_PERP - asset.szDecimals;
 
+		// Fetch USDC quote token precision from spotMeta
+		const spotRes = await fetch(`${BASE_URL}/info`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ type: "spotMeta" }),
+		});
+		if (!spotRes.ok) {
+			throw new Error(`Hyperliquid spotMeta failed (${spotRes.status})`);
+		}
+		const spotMeta = (await spotRes.json()) as { tokens: Array<{ name: string; weiDecimals: number }> };
+		const usdcToken = spotMeta.tokens.find((t) => t.name === "USDC");
+		if (!usdcToken) {
+			throw new Error("USDC token not found in Hyperliquid spotMeta");
+		}
+		const quoteDecimals = usdcToken.weiDecimals;
+
 		// Start streams
 		this.orderbookStream = new HyperliquidOrderbookStream(
 			this.options.symbol,
@@ -74,7 +90,8 @@ export class HyperliquidMonitorFeed implements MonitorFeed {
 			symbol: asset.name,
 			priceDecimals,
 			sizeDecimals: asset.szDecimals,
-			quoteDecimals: 2,
+			quoteDecimals,
+			minOrderNotionalUsd: 0,
 		};
 	}
 

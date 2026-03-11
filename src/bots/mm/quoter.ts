@@ -95,10 +95,11 @@ export class Quoter {
 		return aligned.mul(this.tickSize);
 	}
 
-	// Convert USD to size aligned to lot size
+	// Convert USD to size, rounding UP to lot boundary to stay above minimum notional
 	private usdToSize(usd: number, fairPrice: Decimal): Decimal {
 		const rawSize = new Decimal(usd).div(fairPrice);
-		return this.alignSize(rawSize);
+		const lots = rawSize.div(this.lotSize).ceil();
+		return lots.mul(this.lotSize);
 	}
 
 	// Align size to lot size

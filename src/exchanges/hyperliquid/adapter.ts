@@ -5,6 +5,7 @@ import type { Hex } from "viem";
 import type { BalanceSnapshot, ExchangeAdapter, FeeRateInfo, TradeRecord } from "../adapter.js";
 import {
 	HyperliquidClient,
+	MAX_PRICE_DECIMALS_PERP,
 	buildCancelWire,
 	buildModifyWire,
 	buildOrderWire,
@@ -27,6 +28,9 @@ import type {
 	Quote,
 } from "../../types.js";
 import { log } from "../../utils/logger.js";
+
+// Hyperliquid fixed platform rule: all orders must be >= $10 notional
+const MIN_ORDER_NOTIONAL_USD = 10;
 
 // Hyperliquid fee rates are returned as decimal strings (e.g., "0.00035")
 // Convert to PPM (parts per million) to match ExchangeAdapter interface
@@ -81,11 +85,15 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		this.assetIndex = idx;
 		this.szDecimals = meta.universe[idx].szDecimals;
 
-		// Hyperliquid perps: max decimal places = 6 - szDecimals, max 5 significant figures
-		const MAX_PRICE_DECIMALS_PERP = 6;
 		const priceDecimals = MAX_PRICE_DECIMALS_PERP - this.szDecimals;
-		// Quote token is always USD on Hyperliquid (no separate quote token)
-		const quoteDecimals = 2;
+
+		// Fetch USDC quote token precision from spotMeta
+		const spotMeta = await this.client.getSpotMeta();
+		const usdcToken = spotMeta.tokens.find((t) => t.name === "USDC");
+		if (!usdcToken) {
+			throw new Error("USDC token not found in Hyperliquid spotMeta");
+		}
+		const quoteDecimals = usdcToken.weiDecimals;
 
 		// Initialize streams
 		this.orderbookStream = new HyperliquidOrderbookStream(
@@ -131,6 +139,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 			priceDecimals,
 			sizeDecimals: this.szDecimals,
 			quoteDecimals,
+			minOrderNotionalUsd: MIN_ORDER_NOTIONAL_USD,
 		};
 	}
 

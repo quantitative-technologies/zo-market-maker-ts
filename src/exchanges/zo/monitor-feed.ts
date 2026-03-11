@@ -85,6 +85,7 @@ export class ZoMonitorFeed implements MonitorFeed {
 			priceDecimals: market.priceDecimals,
 			sizeDecimals: market.sizeDecimals,
 			quoteDecimals: quoteToken.decimals,
+			minOrderNotionalUsd: 0,
 		};
 	}
 
