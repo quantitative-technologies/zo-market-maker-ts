@@ -169,24 +169,43 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 	): Promise<CachedOrder[]> {
 		const client = this.requireClient();
 
-		// Pair cancels with places → batchModify for optimal execution
-		const pairCount = Math.min(cancels.length, places.length);
-		const pairedCancels = cancels.slice(0, pairCount);
-		const pairedPlaces = places.slice(0, pairCount);
-		const unpairedCancels = cancels.slice(pairCount);
-		const unpairedPlaces = places.slice(pairCount);
+		// Pair cancels with places by side → batchModify for optimal execution
+		// Hyperliquid rejects modifying an order to a different side
+		const pairedCancels: CachedOrder[] = [];
+		const pairedPlaces: Quote[] = [];
+		const unpairedCancels: CachedOrder[] = [];
+		const unpairedPlaces: Quote[] = [];
+
+		for (const place of places) {
+			const matchIdx = cancels.findIndex(
+				(c) => c.side === place.side && !pairedCancels.includes(c),
+			);
+			if (matchIdx !== -1) {
+				pairedCancels.push(cancels[matchIdx]);
+				pairedPlaces.push(place);
+			} else {
+				unpairedPlaces.push(place);
+			}
+		}
+		for (const cancel of cancels) {
+			if (!pairedCancels.includes(cancel)) {
+				unpairedCancels.push(cancel);
+			}
+		}
 
 		const newOrders: CachedOrder[] = [];
 
 		// 1. batchModify paired orders (ALO for post-only, high priority tier)
-		if (pairCount > 0) {
+		if (pairedCancels.length > 0) {
 			const modifies = pairedCancels.map((cancel, i) => {
 				const place = pairedPlaces[i];
+				const price = roundPrice(place.price.toNumber(), this.szDecimals);
+				const size = place.size.toNumber();
 				const orderWire = buildOrderWire(
 					this.assetIndex,
 					place.side === "bid",
-					roundPrice(place.price.toNumber(), this.szDecimals),
-					place.size.toNumber(),
+					price,
+					size,
 					false,
 					"Alo",
 				);
@@ -197,11 +216,12 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 			for (let i = 0; i < statuses.length; i++) {
 				const status = statuses[i];
 				const place = pairedPlaces[i];
+				const price = roundPrice(place.price.toNumber(), this.szDecimals);
 				if (status.resting) {
 					newOrders.push({
 						orderId: String(status.resting.oid),
 						side: place.side,
-						price: place.price,
+						price: new Decimal(price),
 						size: place.size,
 					});
 				} else if (status.error) {
@@ -220,26 +240,29 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 
 		// 3. Place unpaired new orders (ALO)
 		if (unpairedPlaces.length > 0) {
-			const orderWires = unpairedPlaces.map((place) =>
-				buildOrderWire(
+			const orderWires = unpairedPlaces.map((place) => {
+				const price = roundPrice(place.price.toNumber(), this.szDecimals);
+				const size = place.size.toNumber();
+				return buildOrderWire(
 					this.assetIndex,
 					place.side === "bid",
-					roundPrice(place.price.toNumber(), this.szDecimals),
-					place.size.toNumber(),
+					price,
+					size,
 					false,
 					"Alo",
-				),
-			);
+				);
+			});
 
 			const statuses = await client.placeOrders(orderWires);
 			for (let i = 0; i < statuses.length; i++) {
 				const status = statuses[i];
 				const place = unpairedPlaces[i];
+				const price = roundPrice(place.price.toNumber(), this.szDecimals);
 				if (status.resting) {
 					newOrders.push({
 						orderId: String(status.resting.oid),
 						side: place.side,
-						price: place.price,
+						price: new Decimal(price),
 						size: place.size,
 					});
 				} else if (status.error) {
