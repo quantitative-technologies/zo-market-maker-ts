@@ -389,16 +389,17 @@ export class MarketMaker {
 		const markPrice = fairPrice ?? binancePrice?.mid ?? 0;
 		log.info(`SHUTDOWN: mark price = ${markPrice}`);
 
-		// Cancel orders
+		// Cancel orders — sync from exchange to get true open orders, not stale local cache
 		try {
-			if (this.activeOrders.length > 0) {
-				log.info(`SHUTDOWN: cancelling ${this.activeOrders.length} orders...`);
-				await this.adapter.cancelOrders(this.activeOrders);
+			const liveOrders = await this.adapter.syncOrders();
+			if (liveOrders.length > 0) {
+				log.info(`SHUTDOWN: cancelling ${liveOrders.length} orders (from exchange)...`);
+				await this.adapter.cancelOrders(liveOrders);
 				log.info("SHUTDOWN: orders cancelled");
-				this.activeOrders = [];
 			} else {
-				log.info("SHUTDOWN: no active orders");
+				log.info("SHUTDOWN: no open orders on exchange");
 			}
+			this.activeOrders = [];
 		} catch (err) {
 			log.error("SHUTDOWN: cancel orders failed (continuing):", err);
 		}

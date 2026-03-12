@@ -349,9 +349,9 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		const client = this.requireClient();
 		const fees = await client.getUserFees();
 
-		// userAdd = maker rate, userCross = taker rate (decimal strings like "0.00035")
-		const makerFeePpm = Math.round(Number(fees.userAdd) * FEE_DECIMAL_TO_PPM);
-		const takerFeePpm = Math.round(Number(fees.userCross) * FEE_DECIMAL_TO_PPM);
+		// userAddRate = maker rate, userCrossRate = taker rate (decimal strings like "0.00035")
+		const makerFeePpm = Math.round(Number(fees.userAddRate) * FEE_DECIMAL_TO_PPM);
+		const takerFeePpm = Math.round(Number(fees.userCrossRate) * FEE_DECIMAL_TO_PPM);
 
 		return {
 			feeTierId: 0, // Hyperliquid doesn't expose a numeric tier ID

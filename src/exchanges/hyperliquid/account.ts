@@ -79,8 +79,9 @@ export class HyperliquidAccountStream {
 				const msg = JSON.parse(raw.toString());
 				if (msg.channel === "userFills") {
 					this.handleUserFills(msg as WsUserFillMsg);
+				} else if (msg.channel === "orderUpdates") {
+					this.logOrderUpdates(msg as WsOrderUpdatesMsg);
 				}
-				// orderUpdates received but not actively used — fills are the primary signal
 			} catch (err) {
 				log.error("Hyperliquid account parse error:", err);
 			}
@@ -100,6 +101,8 @@ export class HyperliquidAccountStream {
 	}
 
 	private handleUserFills(msg: WsUserFillMsg): void {
+		if (msg.data.isSnapshot) return;
+
 		for (const fill of msg.data.fills) {
 			if (fill.coin !== this.coin) continue;
 

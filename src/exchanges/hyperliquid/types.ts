@@ -117,8 +117,8 @@ export interface UserFees {
 			mm: string;
 		};
 	};
-	userAdd: string;
-	userCross: string;
+	userAddRate: string;
+	userCrossRate: string;
 }
 
 // ── Order wire format ──

@@ -28,6 +28,7 @@
 ## Code Style
 
 - Avoid defensive programming. Do not add fallbacks, guards, or alternative paths for scenarios that cannot happen in practice. If uncertain whether a code path is reachable, ask the user before adding a guard.
+- Never use sleep/delay as a synchronization mechanism hoping the waited duration is "enough". Always await the actual completion condition (e.g., await the async operation, poll for the expected state, use a proper signal). The only exception is when interacting with an external system whose behavior we cannot control and no completion signal exists.
 
 ## Self-Correction
 
