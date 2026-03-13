@@ -111,7 +111,15 @@ export class HyperliquidClient {
 			(s) => typeof s === "object" && "error" in s,
 		);
 		if (errors.length > 0) {
-			log.warn(`Cancel had ${errors.length} errors:`, errors);
+			const allStale = errors.every(
+				(e) => typeof e === "object" && "error" in e &&
+					String(e.error).includes("already canceled, or filled"),
+			);
+			if (allStale) {
+				log.debug(`Cancel: ${errors.length} orders already gone`);
+			} else {
+				log.warn(`Cancel had ${errors.length} errors:`, errors);
+			}
 		}
 	}
 
