@@ -54,6 +54,7 @@ export class ZoAdapter implements ExchangeAdapter {
 	readonly name = "zo";
 
 	onFill: FillCallback | null = null;
+	onOrderCanceled: ((orderId: string) => void) | null = null;
 	onPrice: PriceCallback | null = null;
 	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
 	onTrade: PublicTradeCallback | null = null;

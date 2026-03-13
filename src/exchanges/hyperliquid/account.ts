@@ -1,7 +1,7 @@
 // Hyperliquid account WebSocket stream — userFills + orderUpdates
 
 import WebSocket from "ws";
-import type { FillCallback, FillEvent } from "../../types.js";
+import type { FillCallback, FillEvent, OrderCanceledCallback } from "../../types.js";
 import { log } from "../../utils/logger.js";
 import type { WsOrderUpdate, WsOrderUpdatesMsg, WsUserFill, WsUserFillMsg } from "./types.js";
 
@@ -20,6 +20,7 @@ export class HyperliquidAccountStream {
 	private staleCheckInterval: NodeJS.Timeout | null = null;
 
 	onFill: FillCallback | null = null;
+	onOrderCanceled: OrderCanceledCallback | null = null;
 
 	constructor(
 		private readonly address: string,
@@ -80,7 +81,7 @@ export class HyperliquidAccountStream {
 				if (msg.channel === "userFills") {
 					this.handleUserFills(msg as WsUserFillMsg);
 				} else if (msg.channel === "orderUpdates") {
-					this.logOrderUpdates(msg as WsOrderUpdatesMsg);
+					this.handleOrderUpdates(msg as WsOrderUpdatesMsg);
 				}
 			} catch (err) {
 				log.error("Hyperliquid account parse error:", err);
@@ -116,6 +117,19 @@ export class HyperliquidAccountStream {
 			};
 
 			this.onFill?.(fillEvent);
+		}
+	}
+
+	private handleOrderUpdates(msg: WsOrderUpdatesMsg): void {
+		for (const update of msg.data) {
+			if (update.order.coin !== this.coin) continue;
+
+			const status = update.status;
+			if (status === "open" || status === "filled") continue;
+
+			const orderId = String(update.order.oid);
+			log.debug(`Order ${orderId} ${status} (${update.order.side} ${update.order.sz}@${update.order.limitPx})`);
+			this.onOrderCanceled?.(orderId);
 		}
 	}
 

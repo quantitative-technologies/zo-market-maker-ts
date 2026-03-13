@@ -180,7 +180,12 @@ export interface BatchModifyAction {
 	modifies: ModifyWire[];
 }
 
-export type ExchangeAction = OrderAction | CancelAction | BatchModifyAction;
+export interface ReserveRequestWeightAction {
+	type: "reserveRequestWeight";
+	weight: number;
+}
+
+export type ExchangeAction = OrderAction | CancelAction | BatchModifyAction | ReserveRequestWeightAction;
 
 // ── Exchange response ──
 
@@ -220,6 +225,13 @@ export interface BatchModifyResponseSuccess {
 	};
 }
 
+export interface DefaultResponseSuccess {
+	status: "ok";
+	response: {
+		type: "default";
+	};
+}
+
 export interface ExchangeResponseError {
 	status: "err";
 	response: string;
@@ -229,6 +241,7 @@ export type ExchangeResponse =
 	| OrderResponseSuccess
 	| CancelResponseSuccess
 	| BatchModifyResponseSuccess
+	| DefaultResponseSuccess
 	| ExchangeResponseError;
 
 // ── WebSocket messages ──

@@ -20,6 +20,7 @@ import type {
 	OrderResponseSuccess,
 	OrderStatus,
 	OrderWire,
+	ReserveRequestWeightAction,
 	UserFees,
 	UserFill,
 } from "./types.js";
@@ -128,6 +129,18 @@ export class HyperliquidClient {
 		return success.response.data.statuses;
 	}
 
+	async reserveRequestWeight(weight: number): Promise<void> {
+		const action: ReserveRequestWeightAction = {
+			type: "reserveRequestWeight",
+			weight,
+		};
+
+		const response = await this.postExchange(action);
+		if (response.status === "err") {
+			throw new Error(`Reserve request weight failed: ${response.response}`);
+		}
+	}
+
 	// ── Private helpers ──
 
 	private async postInfo<T>(type: string, payload?: Record<string, unknown>): Promise<T> {
@@ -146,7 +159,7 @@ export class HyperliquidClient {
 		return res.json() as Promise<T>;
 	}
 
-	private async postExchange(action: OrderAction | CancelAction | BatchModifyAction): Promise<ExchangeResponse> {
+	private async postExchange(action: OrderAction | CancelAction | BatchModifyAction | ReserveRequestWeightAction): Promise<ExchangeResponse> {
 		const nonce = Date.now();
 		// API wallets sign directly — no vaultAddress needed
 		const signature = await signAction(this.account, action, nonce);

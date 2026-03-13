@@ -53,6 +53,9 @@ restart-%:
 logs-%:
 	docker compose logs -f mm-$*
 
+reserve-actions-%:
+	npm run reserve-actions -- $*
+
 monitor-zo-%:
 	npm run monitor -- zo $*
 

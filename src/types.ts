@@ -37,6 +37,8 @@ export interface FillEvent {
 
 export type FillCallback = (fill: FillEvent) => void;
 
+export type OrderCanceledCallback = (orderId: string) => void;
+
 // Cached order info
 export interface CachedOrder {
 	orderId: string;

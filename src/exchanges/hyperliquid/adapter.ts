@@ -48,6 +48,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 	readonly name = "hyperliquid";
 
 	onFill: FillCallback | null = null;
+	onOrderCanceled: ((orderId: string) => void) | null = null;
 	onPrice: PriceCallback | null = null;
 	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
 	onTrade: PublicTradeCallback | null = null;
@@ -127,6 +128,9 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		);
 		this.accountStream.onFill = (fill: FillEvent) => {
 			this.onFill?.(fill);
+		};
+		this.accountStream.onOrderCanceled = (orderId: string) => {
+			this.onOrderCanceled?.(orderId);
 		};
 
 		// Start connections
@@ -226,6 +230,8 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 					});
 				} else if (status.error) {
 					log.warn(`batchModify order ${i} error: ${status.error}`);
+					// Original order is gone on the exchange — fall back to fresh place
+					unpairedPlaces.push(pairedPlaces[i]);
 				}
 			}
 		}

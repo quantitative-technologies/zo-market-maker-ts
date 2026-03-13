@@ -190,6 +190,15 @@ export class MarketMaker {
 			}
 		};
 
+		// Exchange-initiated order cancellations (margin, self-trade, etc.)
+		this.adapter.onOrderCanceled = (orderId: string) => {
+			const idx = this.activeOrders.findIndex((o) => o.orderId === orderId);
+			if (idx !== -1) {
+				log.warn(`Order ${orderId} canceled by exchange — removing from active orders`);
+				this.activeOrders.splice(idx, 1);
+			}
+		};
+
 		// Exchange adapter orderbook price
 		this.adapter.onPrice = (price: MidPrice) => this.handleExchangePrice(price);
 

@@ -8,6 +8,7 @@
     "build": "tsc",
     "bot": "node --import tsx src/cli/bot.ts",
     "monitor": "node --import tsx src/cli/monitor.ts",
+    "reserve-actions": "node --import tsx src/cli/reserve-actions.ts",
     "check": "biome check src",
     "format": "biome format --write src",
     "lint": "biome lint src",
