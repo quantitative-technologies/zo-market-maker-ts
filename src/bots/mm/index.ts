@@ -172,6 +172,14 @@ export class MarketMaker {
 
 			this.balanceTracker?.recordFill(fill.side, fill.size, fill.price);
 
+			// Remove fully filled order from activeOrders to prevent stale batchModify
+			if (fill.remaining === 0) {
+				const idx = this.activeOrders.findIndex((o) => o.orderId === fill.orderId);
+				if (idx !== -1) {
+					this.activeOrders.splice(idx, 1);
+				}
+			}
+
 			// Record fill for markout analytics
 			const bp = this.binanceFeed?.getMidPrice();
 			const fairAtFill = bp ? (this.fairPriceCalc?.getFairPrice(bp.mid) ?? fill.price) : fill.price;
