@@ -229,7 +229,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 						size: place.size,
 					});
 				} else if (status.error) {
-					log.warn(`batchModify order ${i} error: ${status.error}`);
+					log.debug(`batchModify order ${i} fallback to place: ${status.error}`);
 					// Original order is gone on the exchange — fall back to fresh place
 					unpairedPlaces.push(pairedPlaces[i]);
 				}
