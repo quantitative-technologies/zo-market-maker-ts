@@ -48,7 +48,7 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 	readonly name = "hyperliquid";
 
 	onFill: FillCallback | null = null;
-	onOrderCanceled: ((orderId: string) => void) | null = null;
+	onOrderCanceled: ((orderId: string, status: string) => void) | null = null;
 	onPrice: PriceCallback | null = null;
 	onOrderbookUpdate: OrderbookUpdateCallback | null = null;
 	onTrade: PublicTradeCallback | null = null;
@@ -129,8 +129,8 @@ export class HyperliquidAdapter implements ExchangeAdapter {
 		this.accountStream.onFill = (fill: FillEvent) => {
 			this.onFill?.(fill);
 		};
-		this.accountStream.onOrderCanceled = (orderId: string) => {
-			this.onOrderCanceled?.(orderId);
+		this.accountStream.onOrderCanceled = (orderId: string, status: string) => {
+			this.onOrderCanceled?.(orderId, status);
 		};
 
 		// Start connections

@@ -296,8 +296,23 @@ export interface WsOrderUpdate {
 		timestamp: number;
 		origSz: string;
 	};
-	status: "open" | "filled" | "canceled" | "triggered" | "rejected" | "marginCanceled";
+	status: string; // "open" | "filled" | "canceled" | system cancels (*Canceled) | rejections (*Rejected)
 	statusTimestamp: number;
+}
+
+// User-initiated cancel (from batchModify replacement or explicit cancel)
+export function isUserCancel(status: string): boolean {
+	return status === "canceled";
+}
+
+// System-initiated cancel — exchange force-canceled the order
+export function isSystemCancel(status: string): boolean {
+	return status.endsWith("Canceled") || status === "scheduledCancel";
+}
+
+// Rejection — order was never placed
+export function isRejection(status: string): boolean {
+	return status.endsWith("Rejected");
 }
 
 export interface WsOrderUpdatesMsg {

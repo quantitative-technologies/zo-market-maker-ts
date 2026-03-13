@@ -41,7 +41,7 @@ export interface ExchangeAdapter {
 
 	// Data feeds — adapter calls these callbacks when data arrives
 	onFill: FillCallback | null;
-	onOrderCanceled: ((orderId: string) => void) | null;
+	onOrderCanceled: ((orderId: string, status: string) => void) | null;
 	onPrice: PriceCallback | null;
 	onOrderbookUpdate: OrderbookUpdateCallback | null;
 	onTrade: PublicTradeCallback | null;

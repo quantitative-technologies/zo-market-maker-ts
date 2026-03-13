@@ -169,12 +169,16 @@ export const log = {
 		fair: number,
 		spreadBps: number,
 		mode: "normal" | "close",
+		bbo?: { bestBid: number; bestAsk: number } | null,
 	): void {
 		const d = FMT_DECIMALS;
 		const bidStr = bid !== null ? `$${bid.toFixed(d.PRICE)}` : "--";
 		const askStr = ask !== null ? `$${ask.toFixed(d.PRICE)}` : "--";
+		const bboStr = bbo
+			? ` | BOOK ${bbo.bestBid.toFixed(d.PRICE)}/${bbo.bestAsk.toFixed(d.PRICE)}`
+			: "";
 		this.info(
-			`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(d.PRICE)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}`,
+			`QUOTE: BID ${bidStr} | ASK ${askStr} | FAIR $${fair.toFixed(d.PRICE)} | SPREAD ${spreadBps}bps | ${mode.toUpperCase()}${bboStr}`,
 		);
 	},
 

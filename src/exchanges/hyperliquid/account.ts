@@ -3,6 +3,7 @@
 import WebSocket from "ws";
 import type { FillCallback, FillEvent, OrderCanceledCallback } from "../../types.js";
 import { log } from "../../utils/logger.js";
+import { isUserCancel, isSystemCancel, isRejection } from "./types.js";
 import type { WsOrderUpdate, WsOrderUpdatesMsg, WsUserFill, WsUserFillMsg } from "./types.js";
 
 const WS_URL = "wss://api.hyperliquid.xyz/ws";
@@ -128,8 +129,17 @@ export class HyperliquidAccountStream {
 			if (status === "open" || status === "filled") continue;
 
 			const orderId = String(update.order.oid);
-			log.debug(`Order ${orderId} ${status} (${update.order.side} ${update.order.sz}@${update.order.limitPx})`);
-			this.onOrderCanceled?.(orderId);
+			const orderDesc = `${update.order.side} ${update.order.sz}@${update.order.limitPx}`;
+
+			if (isSystemCancel(status)) {
+				log.warn(`Order ${orderId} ${status} by exchange (${orderDesc})`);
+			} else if (isRejection(status)) {
+				log.error(`Order ${orderId} ${status} (${orderDesc})`);
+			} else if (!isUserCancel(status)) {
+				log.warn(`Order ${orderId} unexpected status: ${status} (${orderDesc})`);
+			}
+
+			this.onOrderCanceled?.(orderId, status);
 		}
 	}
 

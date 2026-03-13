@@ -190,11 +190,13 @@ export class MarketMaker {
 			}
 		};
 
-		// Exchange-initiated order cancellations (margin, self-trade, etc.)
-		this.adapter.onOrderCanceled = (orderId: string) => {
+		// Order cancellation handler — only act on system cancels, ignore batchModify replacements
+		this.adapter.onOrderCanceled = (orderId: string, status: string) => {
+			if (status === "canceled") return; // batchModify replacement — handled by executeUpdate
+
 			const idx = this.activeOrders.findIndex((o) => o.orderId === orderId);
 			if (idx !== -1) {
-				log.warn(`Order ${orderId} canceled by exchange — removing from active orders`);
+				log.warn(`Order ${orderId} ${status} — removing from active orders`);
 				this.activeOrders.splice(idx, 1);
 			}
 		};
@@ -538,6 +540,7 @@ export class MarketMaker {
 				fairPrice,
 				spreadBps,
 				isClose ? "close" : "normal",
+				bbo,
 			);
 
 			const { kept, toCancel, toPlace } = diffOrders(this.activeOrders, quotes);
